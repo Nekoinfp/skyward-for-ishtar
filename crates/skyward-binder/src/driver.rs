@@ -6,6 +6,7 @@ use std::fs::File;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// The driver every program on the phone reaches its neighbours through.
 const DEVICE: &str = "/dev/binder";
@@ -192,6 +193,20 @@ impl Binder {
 
     /// Call method `code` on `handle` and wait for what it answers.
     pub fn transact(&self, handle: u32, code: u32, data: &impl Payload) -> Result<Reply<'_>> {
+        self.transact_within(handle, code, data, None)
+    }
+
+    /// [`Binder::transact`], giving up after `timeout` if the service has not
+    /// answered by then.
+    ///
+    /// A service that cannot answer at all — one waiting on a secure element
+    /// the recovery does not reach, say — leaves the driver waiting on it for
+    /// as long as the driver allows, which is tens of seconds, and the page
+    /// holding the recovery is stuck behind it. Waiting on the driver's own
+    /// readability instead puts that wait under the caller's hand: a service
+    /// that has said nothing by `timeout` is given up on, and the caller
+    /// tells the person what that means.
+    pub fn transact_within(&self, handle: u32, code: u32, data: &impl Payload, timeout: Option<Duration>) -> Result<Reply<'_>> {
         let payload = data.values();
         let addresses = data.addresses();
         let td = TransactionData {
@@ -220,8 +235,22 @@ impl Binder {
         // served here, which is answered and the waiting gone on with.
         let mut waiting = Waiting { words: write, replies: Vec::new() };
         let mut said = [0u8; SAID_BYTES];
+        let mut sent = false;
         loop {
+            // The call itself is handed over whatever the wait: the driver
+            // does not block while there is nothing for it to wait on. Only
+            // the wait for the answer is held to `timeout`, and only where
+            // there is nothing left to tell it: a reply owed to a call made
+            // on an object served here is what lets the driver go on, and
+            // waiting for it to speak first would wait for ever.
+            if sent && waiting.words.is_empty() {
+                if let Some(timeout) = timeout {
+                    wait_readable(self.file.as_raw_fd(), timeout)
+                        .with_context(|| format!("wait {timeout:?} for the answer to method {code}"))?;
+                }
+            }
             let heard = self.exchange(&mut waiting, &mut said).context("send a call")?;
+            sent = true;
             if let Some(reply) = self.take_in(&said[..heard], &mut waiting, true)? {
                 // What is still waiting to be told is told now: nothing
                 // asks the driver on this thread again for certain.
@@ -404,6 +433,32 @@ unsafe fn call(file: &File, request: u32, arg: *mut libc::c_void) -> Result<()> 
     }
 }
 
+/// Wait until the driver has something to say, or say that `timeout` passed
+/// with nothing.
+///
+/// A call's answer comes back through the driver's own file becoming
+/// readable, so waiting on that with a deadline is what keeps a service that
+/// will never answer from holding the caller for as long as the driver would
+/// allow.
+fn wait_readable(fd: i32, timeout: Duration) -> Result<()> {
+    let millis = i32::try_from(timeout.as_millis()).unwrap_or(i32::MAX);
+    let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    loop {
+        let ready = unsafe { libc::poll(&mut pfd, 1, millis) };
+        match ready {
+            0 => bail!("the service answered nothing within {timeout:?}"),
+            n if n > 0 => return Ok(()),
+            _ => {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(err).context("wait for the driver to have something to say");
+            }
+        }
+    }
+}
+
 /// An object in another process, held open until this goes out of scope.
 pub struct Handle<'a> {
     binder: &'a Binder,
@@ -423,6 +478,12 @@ impl<'a> Handle<'a> {
 
     pub fn transact(&self, code: u32, data: &impl Payload) -> Result<Reply<'a>> {
         self.binder.transact(self.handle, code, data)
+    }
+
+    /// [`Handle::transact`], giving up after `timeout` if the service has not
+    /// answered by then.
+    pub fn transact_within(&self, code: u32, data: &impl Payload, timeout: Option<Duration>) -> Result<Reply<'a>> {
+        self.binder.transact_within(self.handle, code, data, timeout)
     }
 }
 
