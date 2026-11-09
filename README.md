@@ -217,7 +217,7 @@ otherwise.
 ## Installing Skyward
 
 Skyward needs an unlocked bootloader. Download the image from
-[Releases](https://github.com/Rinrroy/skyward-for-haotian/releases), check it
+[Releases](https://github.com/zhouzt0121/skyward/releases), check it
 against `SHA256SUMS`, and flash it to the recovery partition of the slot the
 phone runs from, with the phone in fastboot mode:
 
