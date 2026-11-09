@@ -1434,6 +1434,8 @@ pub enum Action {
     Resolve(ClashChoice),
     /// Stop giving the data partition's files their labels.
     StopRelabel,
+    /// Disable AVB2.0 in every vbmeta partition of both slots now.
+    DisableAvb,
     /// Open the page of the filesystem page's partition at this place.
     OpenFilesystem(usize),
     /// Choose what to do to the partition that page shows.
@@ -2464,6 +2466,9 @@ pub enum Effect {
     Relabel,
     /// Stop giving the data partition's files their labels.
     StopRelabel,
+    /// Disable AVB2.0 in every vbmeta partition of both slots, telling how
+    /// it went with [`App::avb_disabled`].
+    DisableAvb,
     /// Read the partitions for the filesystem page, which has just opened,
     /// telling them with [`App::set_filesystems`].
     ReadFilesystems,
@@ -5316,6 +5321,20 @@ impl App {
         self.say(why, now);
     }
 
+    /// How disabling AVB2.0 went: the partitions handled, or why it failed.
+    pub fn avb_disabled(&mut self, result: Result<Vec<String>, String>, now: u64) {
+        let l = self.state.lang;
+        let text = match result {
+            Ok(names) if names.is_empty() => l.pick(["未找到 vbmeta 分区", "找不到 vbmeta 分割區", "No vbmeta partition found"]).to_string(),
+            Ok(names) => {
+                let names = names.join(", ");
+                crate::tr!(l, "禁用 AVB2.0 完成：{names}", "停用 AVB2.0 完成：{names}", "Disabled AVB2.0: {names}")
+            }
+            Err(why) => crate::tr!(l, "禁用 AVB2.0 失败：{why}", "停用 AVB2.0 失敗：{why}", "Disabling AVB2.0 failed: {why}"),
+        };
+        self.say(&text, now);
+    }
+
     fn say(&mut self, text: &str, now: u64) {
         self.toast = Some((text.to_string(), now + TOAST_MS));
         self.dirty = true;
@@ -6070,6 +6089,10 @@ impl App {
                     self.refresh();
                     return vec![Effect::StopJob];
                 }
+            }
+            Action::DisableAvb => {
+                self.say(self.state.lang.pick(["正在禁用 AVB2.0…", "正在停用 AVB2.0…", "Disabling AVB2.0…"]), now);
+                return vec![Effect::DisableAvb];
             }
             Action::StopRelabel => {
                 let job = self.state.relabel.as_mut().expect("only work under way is stopped");
