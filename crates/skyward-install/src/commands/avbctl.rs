@@ -284,10 +284,10 @@ pub fn disable_slot(slot: skyward_vab::Slot) -> io::Result<Option<PathBuf>> {
     Ok(Some(backup))
 }
 
-/// What an install turns off on xuanyuan: dm-verity alone, in the top-level
-/// vbmeta, as TWRP R7 for Xiaomi's SM8750 phones does. Xiaomi's newer
-/// bootloaders refuse to start with verification itself turned off.
-const AFTER_INSTALL: u32 = 1 << 0;
+/// What an install turns off: both checks, verification and dm-verity,
+/// in the top-level vbmeta of the slot it leaves the phone starting from,
+/// as upstream Skyward 0.3.0 does.
+const AFTER_INSTALL: u32 = (1 << 0) | (1 << 1);
 
 /// Where a vbmeta image is kept before it is changed, so that a phone that
 /// will not boot afterwards can be put back. `/tmp` is memory in a recovery,

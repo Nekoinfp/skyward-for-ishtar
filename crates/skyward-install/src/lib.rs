@@ -5,7 +5,6 @@
 
 pub mod adb;
 pub mod asked;
-pub mod avb;
 pub mod blockmap;
 pub mod commands;
 pub mod fuse;

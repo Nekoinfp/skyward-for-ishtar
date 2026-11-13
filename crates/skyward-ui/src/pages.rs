@@ -1133,9 +1133,9 @@ pub fn install(cx: &Ctx) -> Frame {
     let rows = widgets::list(&mut c, t, f, y + t.m.card_gap, &[avb]);
     out.extend(hits(&rows.rows, &[Action::Toggle(Switch::DisableAvb)]));
     let note = l.pick([
-        "安装完成后关闭 dm-verity，重启后生效。",
-        "安裝完成後停用 dm-verity，重新啟動後生效。",
-        "Turns dm-verity off once the install is done, from the next start.",
+        "安装完成后，本次安装所在槽位的启动验证与 dm-verity 会被关闭，重启后生效。原镜像备份在 /tmp。",
+        "安裝完成後，本次安裝所在槽位的啟動驗證與 dm-verity 會被停用，重新啟動後生效。原映像檔備份在 /tmp。",
+        "After the install, boot verification and dm-verity are turned off in the slot it installed to, from the next start. The image as it was is kept in /tmp.",
     ]);
     let y = widgets::footnote(&mut c, t, f, rows.bottom, note);
     Frame::new(t, fit(c, t, y), out, l.pick(["安装", "安裝", "Install"]), top)

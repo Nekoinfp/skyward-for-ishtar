@@ -490,12 +490,15 @@ fn install<S>(ctx: &mut Context, mount: &Mount<S>, size: u64) -> Result<Done> {
         Package::Unknown => Ok(Done::Decided(Outcome::Refused(Refusal::Unknown))),
     }?;
     // Scripts and update packages turn the checks off in the slot that
-    // starts next on their own (post_avb); a flashed image does it here, for
-    // both slots, as TWRP R7 does.
-    let worked = matches!(done, Done::Decided(Outcome::Flashed { .. }));
-    if worked && ctx.options.disable_avb && !matches!(ctx.origin, Origin::Asked { .. }) {
-        for (name, result) in crate::avb::disable(Path::new(skyward_block::BY_NAME)) {
-            let _ = kmsg(&format!("install: disable AVB2.0 on {name}: {result:?}"));
+    // starts next on their own (post_avb); a flashed image does it here, in
+    // each slot it was written to, the same way.
+    if let Done::Decided(Outcome::Flashed { slots, .. }) = &done {
+        if ctx.options.disable_avb && !matches!(ctx.origin, Origin::Asked { .. }) {
+            for slot in slots.clone() {
+                if let Err(e) = post_avb(ctx, Ok(slot)) {
+                    let _ = kmsg(&format!("install: the AVB checks are not written: {e:#}"));
+                }
+            }
         }
     }
     Ok(done)
