@@ -4,6 +4,7 @@
 
 mod image;
 mod ramdisk;
+pub mod permissive;
 
 pub use image::BootImage;
 pub use ramdisk::{lz4_legacy, Entry, Ramdisk};

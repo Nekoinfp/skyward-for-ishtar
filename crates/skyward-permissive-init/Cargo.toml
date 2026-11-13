@@ -1,0 +1,15 @@
+[package]
+name = "skyward-permissive-init"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# The first program of an init_boot ramdisk made permissive: built for the
+# phone and linked statically, as nothing is there to load libraries from.
+[[bin]]
+name = "permissive-init"
+path = "src/main.rs"
+
+[dependencies]
+libc = { workspace = true }
