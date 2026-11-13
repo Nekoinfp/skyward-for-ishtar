@@ -284,10 +284,6 @@ pub fn disable_slot(slot: skyward_vab::Slot) -> io::Result<Option<PathBuf>> {
     Ok(Some(backup))
 }
 
-/// The flags that turn both checks off.
-#[allow(dead_code)]
-const BOTH: u32 = (1 << 0) | (1 << 1);
-
 /// What an install turns off on xuanyuan: dm-verity alone, in the top-level
 /// vbmeta, as TWRP R7 for Xiaomi's SM8750 phones does. Xiaomi's newer
 /// bootloaders refuse to start with verification itself turned off.

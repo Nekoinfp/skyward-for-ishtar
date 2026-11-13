@@ -97,8 +97,6 @@ pub struct Install {
     /// Skyward goes back into the recovery partitions an install writes
     /// over.
     pub keep_recovery: bool,
-    /// Disable AVB2.0 after an install or flash that worked.
-    pub disable_avb: bool,
 }
 
 /// What a backup takes and where it goes.
@@ -242,7 +240,6 @@ impl Settings {
         }
         state.check_signature = self.install.check_signature;
         state.keep_recovery = self.install.keep_recovery;
-        state.disable_avb = self.install.disable_avb;
         state.backup = picked(&self.backup.parts, &PARTS);
         match self.backup.to.as_str() {
             STORAGE => state.backup_to = Place::Storage,

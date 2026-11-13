@@ -177,12 +177,12 @@ probe = "http://connect.rom.miui.com/generate_204"
 server = "https://update.miui.com/updates/miotaV3.php"
 
 # The stock build the recovery is made on: the Chinese system's
-# OS4.0.0.18, whose full update package on the phone maker's own download
+# OS4.0.3.0, whose full update package on the phone maker's own download
 # server holds the recovery partition the recovery is built on top of.
 [stock]
-version = "OS4.0.0.18.XOACNXM"
-package = "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS4.0.0.18.XOACNXM/xuanyuan-ota_full-OS4.0.0.18.XOACNXM-user-17.0-bfc6faa7f2.zip"
-recovery = "29128f33b29242bc947d23ae0e883c3030ad07666bd714f693d906553b93d0ba"
+version = "OS4.0.3.0.XOACNXM"
+package = "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS4.0.3.0.XOACNXM/xuanyuan-ota_full-OS4.0.3.0.XOACNXM-user-17.0-3423afea40.zip"
+recovery = "2e0f794bc993cdcf63f883b5caeed8b6ab10012581bcfdcc1f7bb4703370106f"
 
 # qcom-hv-haptics (qcom,hv-haptics in its dtbo), whose driver says the
 # motor's resonant frequency as the 17 Ultra's does; the click is made from

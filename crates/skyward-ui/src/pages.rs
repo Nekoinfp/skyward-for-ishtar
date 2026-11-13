@@ -1109,17 +1109,6 @@ pub fn install(cx: &Ctx) -> Frame {
     out.extend(hits(&signature.rows, &[Action::Toggle(Switch::Signature)]));
     let note = l.pick(["开启后，仅安装带有本机官方签名的刷机包。", "開啟後，僅安裝帶有本機官方簽章的刷機包。", "When on, only zips signed with this phone's official keys install."]);
     let mut y = widgets::footnote(&mut c, t, f, signature.bottom, note);
-    {
-        let row = Row::new(l.pick(["刷入后自动禁用 AVB2.0", "刷入後自動停用 AVB2.0", "Disable AVB2.0 after flashing"])).trail(Trail::Switch(cx.state.disable_avb));
-        let options = widgets::list(&mut c, t, f, y + t.m.card_gap, &[row]);
-        out.extend(hits(&options.rows, &[Action::Toggle(Switch::DisableAvb)]));
-        let note = l.pick([
-            "开启后，安装或刷入成功时将两个槽位的 vbmeta、vbmeta_system、vbmeta_vendor 标记为关闭验证，需已解锁 Bootloader。",
-            "開啟後，安裝或刷入成功時將兩個槽位的 vbmeta、vbmeta_system、vbmeta_vendor 標記為關閉驗證，需已解鎖 Bootloader。",
-            "When on, a successful install or flash marks vbmeta, vbmeta_system and vbmeta_vendor of both slots to skip verification. Needs an unlocked bootloader.",
-        ]);
-        y = widgets::footnote(&mut c, t, f, options.bottom, note);
-    }
     if cx.state.recovery_partitions {
         let row = Row::new(l.pick(["自动重新刷入 Skyward", "自動重新刷入 Skyward", "Flash Skyward again"])).switch(cx.state.keep_recovery);
         let options = widgets::list(&mut c, t, f, y + t.m.card_gap, &[row]);
@@ -1136,17 +1125,17 @@ pub fn install(cx: &Ctx) -> Frame {
     // still checks signatures, and an install script is an arbitrary
     // program that may or may not disable them for itself.
     let avb = Row::new(l.pick([
-        "刷入 ROM 后自动禁用 AVB 校验",
-        "刷入 ROM 後自動停用 AVB 驗證",
-        "Disable AVB checks after a ROM is installed",
+        "刷入后自动禁用 AVB2.0",
+        "刷入後自動停用 AVB2.0",
+        "Disable AVB2.0 after flashing",
     ]))
     .switch(cx.state.disable_avb);
     let rows = widgets::list(&mut c, t, f, y + t.m.card_gap, &[avb]);
     out.extend(hits(&rows.rows, &[Action::Toggle(Switch::DisableAvb)]));
     let note = l.pick([
-        "安装完成后，本次安装所在槽位的启动验证与 dm-verity 会被关闭，重启后生效。原镜像备份在 /tmp。",
-        "安裝完成後，本次安裝所在槽位的啟動驗證與 dm-verity 會被停用，重新啟動後生效。原映像檔備份在 /tmp。",
-        "After the install, boot verification and dm-verity are turned off in the slot it installed to, from the next start. The image as it was is kept in /tmp.",
+        "安装完成后关闭 dm-verity，重启后生效。",
+        "安裝完成後停用 dm-verity，重新啟動後生效。",
+        "Turns dm-verity off once the install is done, from the next start.",
     ]);
     let y = widgets::footnote(&mut c, t, f, rows.bottom, note);
     Frame::new(t, fit(c, t, y), out, l.pick(["安装", "安裝", "Install"]), top)
@@ -2424,7 +2413,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
-        Row::new(l.pick(["禁用 AVB2.0", "停用 AVB2.0", "Disable AVB2.0"])).subtitle(l.pick(["关闭两个槽位 vbmeta 的 dm-verity（同 TWRP）", "關閉兩個槽位 vbmeta 的 dm-verity（同 TWRP）", "Turn off dm-verity in both slots' vbmeta, as TWRP does"])).icon(ORANGE, Icon::Shield),
+        Row::new(l.pick(["禁用 AVB2.0", "停用 AVB2.0", "Disable AVB2.0"])).icon(ORANGE, Icon::Shield),
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
         Row::new(l.pick(LOGS)).icon(ORANGE, Icon::Log),
         Row::new(l.pick(UPDATE)).icon(GREEN, Icon::Layers).trail(Trail::Value(update_value(cx))),
