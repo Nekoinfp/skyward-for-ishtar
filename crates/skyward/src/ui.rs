@@ -1184,6 +1184,17 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // the pages come up: it says which subpixel block, if any, went out.
     let _ = skyward_sys::kmsg(&format!("the display is {}", surface.describe()));
     let (w, h) = surface.size();
+    // A touch controller that follows the panel wakes as the panel goes from
+    // rest to running, and at no other time. The recovery service running
+    // again finds it as the earlier run left it, at rest where the panel
+    // rested then, so the panel is put to rest and woken with a dark frame,
+    // as every later wake wakes it, before the touchscreen is taken in and
+    // told its settings: a controller at rest answers none of them.
+    if skyward_sys::runs_again() {
+        surface.rest()?;
+        surface.present(&Canvas::new(w, h))?;
+        surface.settle()?;
+    }
     let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone(), cfg.touch.double_tap)?;
     let started = Instant::now();
     let mut touch_known = false;
