@@ -21,6 +21,9 @@ pub mod ramdisk {
     /// which Skyward puts in that system's init_boot image: linked
     /// statically, since it runs before any system's libraries are there.
     pub const SYSTEM_INIT: &str = "skyward/system-init";
+    /// The first program the permissive kernel puts in an init_boot
+    /// ramdisk, ahead of the ramdisk's own: linked statically too.
+    pub const PERMISSIVE_INIT: &str = "skyward/permissive-init";
     /// The commands install scripts written for other recoveries run that
     /// Skyward answers itself: 7za, avbctl, resetprop and zstd, which a
     /// stock recovery does not carry, and unzip, whose stock version holds

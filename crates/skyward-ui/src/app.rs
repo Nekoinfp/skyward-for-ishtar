@@ -1434,8 +1434,9 @@ pub enum Action {
     Resolve(ClashChoice),
     /// Stop giving the data partition's files their labels.
     StopRelabel,
-    /// Disable AVB2.0 in every vbmeta partition of both slots now.
-    DisableAvb,
+    /// Turn the permissive kernel on in the slot the phone starts from, or
+    /// off where it is on.
+    Permissive,
     /// Open the page of the filesystem page's partition at this place.
     OpenFilesystem(usize),
     /// Choose what to do to the partition that page shows.
@@ -2466,9 +2467,9 @@ pub enum Effect {
     Relabel,
     /// Stop giving the data partition's files their labels.
     StopRelabel,
-    /// Disable AVB2.0 in every vbmeta partition of both slots, telling how
-    /// it went with [`App::avb_disabled`].
-    DisableAvb,
+    /// Turn the permissive kernel on or off in the slot the phone starts
+    /// from, telling how it went with [`App::permissive_done`].
+    Permissive,
     /// Read the partitions for the filesystem page, which has just opened,
     /// telling them with [`App::set_filesystems`].
     ReadFilesystems,
@@ -5321,16 +5322,21 @@ impl App {
         self.say(why, now);
     }
 
-    /// How disabling AVB2.0 went: the partitions handled, or why it failed.
-    pub fn avb_disabled(&mut self, result: Result<Vec<String>, String>, now: u64) {
+    /// How turning the permissive kernel on or off went: whether it is now
+    /// on, and the partitions written, or why it failed.
+    pub fn permissive_done(&mut self, result: Result<(bool, Vec<String>), String>, now: u64) {
         let l = self.state.lang;
         let text = match result {
-            Ok(names) if names.is_empty() => l.pick(["未找到 vbmeta 分区", "找不到 vbmeta 分割區", "No vbmeta partition found"]).to_string(),
-            Ok(names) => {
+            Ok((on, names)) => {
                 let names = names.join(", ");
-                crate::tr!(l, "禁用 AVB2.0 完成：{names}", "停用 AVB2.0 完成：{names}", "Disabled AVB2.0: {names}")
+                match (on, names.is_empty()) {
+                    (true, true) => l.pick(["宽容内核已是开启状态", "寬容核心已是開啟狀態", "The permissive kernel is already on"]).to_string(),
+                    (false, true) => l.pick(["宽容内核已是关闭状态", "寬容核心已是關閉狀態", "The permissive kernel is already off"]).to_string(),
+                    (true, false) => crate::tr!(l, "宽容内核已开启：{names}", "寬容核心已開啟：{names}", "Permissive kernel on: {names}"),
+                    (false, false) => crate::tr!(l, "宽容内核已关闭：{names}", "寬容核心已關閉：{names}", "Permissive kernel off: {names}"),
+                }
             }
-            Err(why) => crate::tr!(l, "禁用 AVB2.0 失败：{why}", "停用 AVB2.0 失敗：{why}", "Disabling AVB2.0 failed: {why}"),
+            Err(why) => crate::tr!(l, "宽容内核切换失败：{why}", "寬容核心切換失敗：{why}", "Switching the permissive kernel failed: {why}"),
         };
         self.say(&text, now);
     }
@@ -6090,9 +6096,9 @@ impl App {
                     return vec![Effect::StopJob];
                 }
             }
-            Action::DisableAvb => {
-                self.say(self.state.lang.pick(["正在禁用 AVB2.0…", "正在停用 AVB2.0…", "Disabling AVB2.0…"]), now);
-                return vec![Effect::DisableAvb];
+            Action::Permissive => {
+                self.say(self.state.lang.pick(["正在切换宽容内核…", "正在切換寬容核心…", "Switching the permissive kernel…"]), now);
+                return vec![Effect::Permissive];
             }
             Action::StopRelabel => {
                 let job = self.state.relabel.as_mut().expect("only work under way is stopped");

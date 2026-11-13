@@ -2872,18 +2872,19 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                             },
                         }
                     }
-                    Effect::DisableAvb => {
-                        let results = skyward_install::avb::disable(std::path::Path::new(skyward_block::BY_NAME));
-                        let mut done = Vec::new();
-                        let mut failed = Vec::new();
-                        for (name, r) in results {
-                            skyward_sys::kmsg(&format!("disable AVB2.0 on {name}: {r:?}"))?;
-                            match r {
-                                Ok(_) => done.push(name),
-                                Err(e) => failed.push(format!("{name}: {e:#}")),
-                            }
-                        }
-                        app.avb_disabled(if failed.is_empty() { Ok(done) } else { Err(failed.join("; ")) }, now);
+                    Effect::Permissive => {
+                        // The slot the recovery started from, which is the
+                        // one the phone starts its system from.
+                        let result = (|| -> anyhow::Result<(bool, Vec<String>)> {
+                            let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
+                            let dir = std::path::Path::new(skyward_block::BY_NAME);
+                            let on = !skyward_install::permissive::state(dir, slot)?.on();
+                            let program = std::fs::read(skyward_install::permissive::program()).context("read the permissive program")?;
+                            let names = skyward_install::permissive::set(dir, slot, on, &program)?;
+                            Ok((on, names))
+                        })();
+                        skyward_sys::kmsg(&format!("permissive kernel: {result:?}"))?;
+                        app.permissive_done(result.map_err(|e| format!("{e:#}")), now);
                     }
                     Effect::StopRelabel => match &relabeler {
                         Some(r) => r.stop(),

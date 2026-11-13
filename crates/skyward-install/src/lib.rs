@@ -12,6 +12,7 @@ pub mod image;
 pub mod keep;
 pub mod ota;
 pub mod package;
+pub mod permissive;
 pub mod script;
 pub mod signature;
 pub mod upgrade;

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+skyward-bootimg = { path = "../skyward-bootimg" }
 abootimg-oxide = "0.5.2"
 anyhow = { workspace = true }
 cms = "0.2.3"
@@ -29,5 +30,4 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2
 zstd = { version = "0.14.3", default-features = false }
 
 [dev-dependencies]
-skyward-bootimg = { path = "../skyward-bootimg" }
 tempfile = "3.27.0"

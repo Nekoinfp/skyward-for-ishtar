@@ -58,6 +58,11 @@ enum Cmd {
         /// statically.
         #[arg(long)]
         system_init: PathBuf,
+        /// The first program of an init_boot ramdisk made permissive,
+        /// skyward-permissive-init built for the device and linked
+        /// statically.
+        #[arg(long)]
+        permissive_init: PathBuf,
         /// The device configuration, devices/<codename>.toml.
         #[arg(long)]
         config: PathBuf,
@@ -136,7 +141,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, firmware, modules, omapi, out } => {
+        Cmd::Recovery { stock, binary, system_init, permissive_init, config, font, mono, mono_license, firmware, modules, omapi, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             let mut rd = Ramdisk::decode(&img.ramdisk)?;
@@ -158,6 +163,7 @@ fn main() -> Result<()> {
             // The second system's first program: it runs before any library
             // is there to load, so it is given a place of its own.
             put(&mut rd, paths::SYSTEM_INIT, 0o755, read(&system_init)?)?;
+            put(&mut rd, paths::PERMISSIVE_INIT, 0o755, read(&permissive_init)?)?;
             put(&mut rd, paths::CONFIG, 0o644, read(&config)?)?;
             put(&mut rd, paths::FONT, 0o644, read(&font)?)?;
             put(&mut rd, paths::MONO, 0o644, read(&mono)?)?;
