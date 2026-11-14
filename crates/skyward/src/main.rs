@@ -1009,14 +1009,18 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
     agree_on_the_notes_key(&registering)
 }
 
+/// How long a file handed over may take to be there once the modules are
+/// loaded: a driver makes its files as it takes its device up, and ueventd
+/// makes the device's node once the kernel has told it of the device,
+/// either of which may come after the load of the module returns.
+#[cfg(target_os = "android")]
+const FILES_MADE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Give each file the phone's own init hands over as it boots to the
 /// account it names, with the mode it gives, as its chown and chmod lines
 /// do. The files are the ones the modules just loaded made, which the
 /// phone's own programs open as those accounts; one not there yet is
 /// waited for.
-#[cfg(target_os = "android")]
-const FILES_MADE: std::time::Duration = std::time::Duration::from_secs(5);
-
 #[cfg(target_os = "android")]
 fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
     use skyward_sys::ueventd;
@@ -1027,7 +1031,7 @@ fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
     for run in owners {
         let (uid, gid) = (id(&run.user)?, id(&run.group)?);
         for path in &run.paths {
-            wait_for_file(Path::new(path), FILES_MADE).context("wait for a file the modules just loaded make")?;
+            skyward_sys::wait_file(Path::new(path), FILES_MADE).context("wait for a file the modules just loaded make")?;
             std::os::unix::fs::chown(path, Some(uid), Some(gid)).with_context(|| format!("give {path} to {}:{}", run.user, run.group))?;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(run.mode))
                 .with_context(|| format!("give {path} the mode {:o}", run.mode))?;
@@ -1035,27 +1039,6 @@ fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
         }
     }
     Ok(handed)
-}
-
-/// Wait until `path` is there, for at most `within`.
-///
-/// A driver makes its node while it takes its device up, and ueventd makes
-/// that node once the kernel has told it of the device: either may come after
-/// the load of the module returns. The phone's own init waits the same way
-/// before it hands a file over, so a recovery that did not would fail on the
-/// first start after the kernel changed.
-#[cfg(target_os = "android")]
-fn wait_for_file(path: &Path, within: std::time::Duration) -> Result<()> {
-    let asked = std::time::Instant::now();
-    loop {
-        if path.exists() {
-            return Ok(());
-        }
-        if asked.elapsed() >= within {
-            return Err(anyhow!("{} did not appear within {within:?}", path.display()));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
 }
 
 /// The folder the recovery's own programs load their libraries from.
