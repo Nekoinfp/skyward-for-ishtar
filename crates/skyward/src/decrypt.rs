@@ -105,6 +105,12 @@ pub fn with_key_service<T>(work: impl FnOnce(&KeyMint) -> Result<T>) -> Result<T
 }
 
 fn work_with_key_service<T>(work: impl FnOnce(&KeyMint) -> Result<T>) -> Result<T> {
+    // The key service may have started before the version values were
+    // adopted, or have been left running by an earlier start of the
+    // recovery. Make it read the installed system's build before it sees
+    // any key: the secure world is told those values at its start, and a
+    // key made under that build is refused until it is told them again.
+    skyward_crypto::environment::pin()?;
     let binder = Binder::open()?;
     let service = KeyMint::open(&binder)?;
     work(&service)

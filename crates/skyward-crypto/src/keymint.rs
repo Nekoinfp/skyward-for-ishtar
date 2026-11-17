@@ -216,14 +216,36 @@ impl<'a> KeyMint<'a> {
         let operation = match self.begin(key_blob, app_id, nonce, note) {
             Ok(operation) => operation,
             Err(e) if status::refused_with(&e) == Some(KEY_REQUIRES_UPGRADE) => {
-                // The phone's firmware has moved on since this key was
-                // made. Renewing it gives a key for the firmware running
-                // now; the one on disk is left as it is, so nothing of the
-                // phone's own is changed by reading it here.
-                let renewed = self
-                    .upgrade(key_blob, |call| Self::binding(call, app_id))
-                    .context("renew the key for the firmware running now")?;
-                self.begin(&renewed, app_id, nonce, note)?
+                // The secure world says the key was made under an older
+                // build. That is answered by telling it the installed
+                // system's build, not by renewing the key: this firm's key
+                // service refuses upgradeKey with an invalid argument, and
+                // a key that was renewed would no longer open in the system
+                // this recovery is there to serve. Start the key service
+                // again with the version values the installed system names,
+                // which is what a recovery of this generation does, and
+                // open the same key with it once more.
+                skyward_sys::kmsg(&format!(
+                    "the key service says a key needs an upgrade ({}); its environment was {}",
+                    e,
+                    crate::environment::said()
+                ))?;
+                let reason = crate::environment::pin().unwrap_or_else(|err| anyhow::anyhow!("{err:#}"));
+                let binder = Binder::open().context("open the key driver after the key service restarted")?;
+                let fresh = KeyMint::open(&binder).context("reach the key service after it restarted")?;
+                match fresh.begin(key_blob, app_id, nonce, note) {
+                    Ok(operation) => operation,
+                    Err(again) if status::refused_with(&again) == Some(KEY_REQUIRES_UPGRADE) => {
+                        anyhow::bail!(
+                            "the key service still says the key needs an upgrade after it was started again: {again:#}; \
+                             its hardware is {}, its environment was {}, and restarting it said {}",
+                            crate::environment::hardware(),
+                            crate::environment::said(),
+                            reason
+                        )
+                    }
+                    Err(again) => return Err(again),
+                }
             }
             Err(e) => return Err(e),
         };
@@ -251,18 +273,6 @@ impl<'a> KeyMint<'a> {
         }
         parameter(call, TAG_NONCE, Value::Blob(nonce));
         parameter(call, TAG_PURPOSE, Value::Enum(VALUE_KEY_PURPOSE, PURPOSE_DECRYPT));
-    }
-
-    /// What a key is bound to, and nothing else, as renewing it takes: the
-    /// service answers a renewal handed the way the key is used (its block
-    /// mode, padding, nonce or purpose) with an invalid argument.
-    fn binding(call: &mut Parcel, app_id: &[u8]) {
-        if app_id.is_empty() {
-            call.i32(0);
-        } else {
-            call.i32(1);
-            parameter(call, TAG_APPLICATION_ID, Value::Blob(app_id));
-        }
     }
 
     /// Open a decryption with the key service and keep hold of it.

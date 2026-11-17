@@ -396,6 +396,7 @@ fn main() -> Result<()> {
         #[cfg(target_os = "android")]
         Cmd::Data { credential, close: false } => {
             use skyward_crypto::data;
+            skyward_crypto::environment::pin()?;
             let binder = skyward_binder::driver::Binder::open()?;
             let service = skyward_crypto::keymint::KeyMint::open(&binder)?;
             let opening = data::open_without_credential(&service)?;
@@ -952,6 +953,7 @@ fn recovery() -> Result<()> {
 #[cfg(target_os = "android")]
 fn open_data_for_art() -> Result<()> {
     use skyward_crypto::data;
+    skyward_crypto::environment::pin()?;
     let binder = skyward_binder::driver::Binder::open()?;
     let service = skyward_crypto::keymint::KeyMint::open(&binder)?;
     data::open_without_credential(&service)?;
