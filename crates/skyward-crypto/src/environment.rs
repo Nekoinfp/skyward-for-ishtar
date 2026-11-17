@@ -8,10 +8,15 @@
 //! still refused is left exactly as it was.
 
 use anyhow::{ensure, Context, Result};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
-const KEYMINT: &str = "vendor.keymint-qti";
-const KEYSTORE: &str = "keystore2";
+/// The program behind the key service. Skyward starts this itself, from the
+/// device's configuration, and supervises it: init has no service by this
+/// name in a recovery, so `ctl.start` cannot bring it back. Killing the
+/// process is what makes the supervisor start it again, reading the version
+/// properties as they are now.
+const KEYMINT_PROGRAM: &str = "/vendor/bin/hw/android.hardware.security.keymint-service-qti";
 
 const BUILD_VERSION: [&str; 4] = [
     "ro.build.version.release",
@@ -42,30 +47,53 @@ pub fn hardware() -> String {
     }
 }
 
-/// Stop the key store and the key service, then start them in that order and
-/// wait for the key service to register. The values are read from the
-/// properties, which the recovery set from the installed system's build.prop
-/// files before the services first started. An empty value means the version
-/// was never adopted; saying so beats letting the secure world answer a
-/// refusal no one can read.
+/// The process running `program`, found the way the recovery's own service
+/// supervisor finds the ones it started: by the executable behind /proc.
+fn running(program: &str) -> Option<u32> {
+    std::fs::read_dir("/proc").ok()?.flatten().find_map(|entry| {
+        let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
+        (std::fs::read_link(entry.path().join("exe")).ok()? == Path::new(program)).then_some(pid)
+    })
+}
+
+/// Make the key service read the installed system's version values, and wait
+/// for it to be back. The values are read from the properties, which the
+/// recovery set from the installed system's build.prop files before the
+/// service first started. An empty value means the version was never adopted;
+/// saying so beats letting the secure world answer a refusal no one can read.
+///
+/// The key service is one of this recovery's own programs, watched by the
+/// supervisor that starts it again when it ends. Asking init to stop or start
+/// it says the name is unknown: init has no such service in a recovery. End
+/// the process instead; the supervisor brings it back with the values as
+/// they stand now.
 pub fn pin() -> Result<()> {
     for name in BUILD_VERSION {
         let value = skyward_sys::prop(name);
         ensure!(value.as_ref().is_some_and(|v| !v.is_empty()), "no value for {name} to give the key service: {}", said());
         skyward_sys::kmsg(&format!("key service environment: {name}={}", value.unwrap_or_default()))?;
     }
-    for service in [KEYSTORE, KEYMINT] {
-        let _ = skyward_sys::set_prop("ctl.stop", service);
+    if let Some(pid) = running(KEYMINT_PROGRAM) {
+        skyward_sys::kmsg(&format!("ending key service pid {pid} so it reads the installed system's version again"))?;
+        let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        ensure!(rc == 0, "signal to key service pid {pid} failed: {}", std::io::Error::last_os_error());
+        // Let the old process go before looking for the new one, or its
+        // name is still in the directory and would be mistaken for a
+        // service that read these values.
+        let until = Instant::now() + Duration::from_secs(5);
+        while running(KEYMINT_PROGRAM) == Some(pid) {
+            ensure!(Instant::now() < until, "key service pid {pid} did not end after SIGTERM");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    } else {
+        skyward_sys::kmsg("the key service is not running yet; waiting for it to register with these values")?;
     }
-    let _ = skyward_sys::wait_prop(&format!("init.svc.{KEYMINT}"), "stopped", Duration::from_secs(5));
-    skyward_sys::set_prop("ctl.start", KEYMINT).context("start the key service again")?;
     let binder = skyward_binder::driver::Binder::open().context("open the key driver after the restart")?;
     let until = Instant::now() + Duration::from_secs(10);
     while skyward_binder::service::find(&binder, super::keymint::SERVICE)?.is_none() {
-        ensure!(Instant::now() < until, "the key service did not register after it was started again");
+        ensure!(Instant::now() < until, "the key service did not register after it was asked to read the version again");
         std::thread::sleep(Duration::from_millis(50));
     }
     skyward_sys::kmsg("the key service registered again with the installed system's version")?;
-    skyward_sys::set_prop("ctl.start", KEYSTORE).context("start the key store again")?;
     Ok(())
 }
