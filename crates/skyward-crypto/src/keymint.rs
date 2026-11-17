@@ -230,22 +230,29 @@ impl<'a> KeyMint<'a> {
                     e,
                     crate::environment::said()
                 ))?;
-                let reason = crate::environment::pin().unwrap_or_else(|err| anyhow::anyhow!("{err:#}"));
+                let reason = match crate::environment::pin() {
+                    Ok(()) => "the key service was started again".to_string(),
+                    Err(e) => format!("the key service could not be started again: {e:#}"),
+                };
                 let binder = Binder::open().context("open the key driver after the key service restarted")?;
                 let fresh = KeyMint::open(&binder).context("reach the key service after it restarted")?;
-                match fresh.begin(key_blob, app_id, nonce, note) {
-                    Ok(operation) => operation,
-                    Err(again) if status::refused_with(&again) == Some(KEY_REQUIRES_UPGRADE) => {
-                        anyhow::bail!(
-                            "the key service still says the key needs an upgrade after it was started again: {again:#}; \
-                             its hardware is {}, its environment was {}, and restarting it said {}",
-                            crate::environment::hardware(),
-                            crate::environment::said(),
-                            reason
-                        )
+                let again = match fresh.begin(key_blob, app_id, nonce, note) {
+                    Ok(op) => {
+                        let mut out = fresh.update(&op, body)?;
+                        out.extend_from_slice(&fresh.finish(&op)?);
+                        return Ok(out);
                     }
-                    Err(again) => return Err(again),
-                }
+                    Err(again) => again,
+                };
+                anyhow::ensure!(
+                    status::refused_with(&again) != Some(KEY_REQUIRES_UPGRADE),
+                    "the key service still says the key needs an upgrade after it was started again: {again:#}; \
+                     its hardware is {}, its environment was {}, and restarting it said {}",
+                    crate::environment::hardware(),
+                    crate::environment::said(),
+                    reason
+                );
+                return Err(again);
             }
             Err(e) => return Err(e),
         };

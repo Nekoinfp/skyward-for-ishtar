@@ -51,7 +51,7 @@ pub fn hardware() -> String {
 pub fn pin() -> Result<()> {
     for name in BUILD_VERSION {
         let value = skyward_sys::prop(name);
-        ensure!(value.is_some_and(|v| !v.is_empty()), "no value for {name} to give the key service: {}", said());
+        ensure!(value.as_ref().is_some_and(|v| !v.is_empty()), "no value for {name} to give the key service: {}", said());
         skyward_sys::kmsg(&format!("key service environment: {name}={}", value.unwrap_or_default()))?;
     }
     for service in [KEYSTORE, KEYMINT] {
