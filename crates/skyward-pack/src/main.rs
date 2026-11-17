@@ -436,12 +436,13 @@ mod tests {
     #[test]
     fn the_lines_that_set_a_name_are_the_only_ones_left_out() {
         let props = b"ro.build.id=TQ\nro.build.version.release=13\nro.build.version.release_or_codename=13\nro.product.name=ishtar\n\
-ro.vendor.build.security_patch=2026-10-01\nro.vendor.build.security_patch_level=1\n";
+ro.build.version.security_patch=2026-10-01\nro.vendor.build.security_patch=2026-10-01\nro.vendor.build.security_patch_level=1\n";
         let out = without(props, &BUILD_VERSION);
         let text = String::from_utf8(out).expect("property files are text");
         assert!(!text.contains("ro.build.version.release=13"));
+        assert!(!text.contains("ro.build.version.release_or_codename=13"), "the newer name for the release is left out too");
+        assert!(!text.contains("ro.build.version.security_patch=2026-10-01"));
         assert!(!text.contains("ro.vendor.build.security_patch=2026-10-01"), "the vendor partition's patch level is left out too");
-        assert!(text.contains("ro.build.version.release_or_codename=13"), "a longer name is left alone");
         assert!(text.contains("ro.vendor.build.security_patch_level=1"), "a longer name is left alone");
         assert!(text.contains("ro.build.id=TQ") && text.contains("ro.product.name=ishtar"));
     }
