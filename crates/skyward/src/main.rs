@@ -802,25 +802,40 @@ fn mount_firmware(partition: &str) -> Result<()> {
 }
 
 /// What the phone's own secure services read to tell the secure world which
-/// build is running: the system's version and patch level, and the vendor
-/// partition's patch level. A recovery image carries its own, older build's
-/// values; the secure world then sees keys the installed system made as
-/// made under a build it does not know, and refuses them. The recovery's
-/// property files leave these out so that they can be set here instead.
+/// build is running: the system's version and patch level, the newer name
+/// for the version, and the vendor partition's patch level. A recovery image
+/// carries its own, older build's values; the secure world then sees keys the
+/// installed system made as made under a build it does not know, and refuses
+/// them. The recovery's property files leave these out so that they can be
+/// set here instead.
 #[cfg(target_os = "android")]
-const BUILD_VERSION: [&str; 3] = ["ro.build.version.release", "ro.build.version.security_patch", "ro.vendor.build.security_patch"];
+const BUILD_VERSION: [&str; 4] = [
+    "ro.build.version.release",
+    "ro.build.version.release_or_codename",
+    "ro.build.version.security_patch",
+    "ro.vendor.build.security_patch",
+];
 
-/// Set each of [`BUILD_VERSION`] to the installed system's value. An earlier
-/// run of the recovery service may have set it already, and init sets such
-/// a property only once.
+/// Set each of [`BUILD_VERSION`] to the installed system's value, read from
+/// the partitions that own the names rather than from the merged set, where
+/// a ported system's other maker's files could have replaced them. An
+/// earlier run of the recovery service may have set one already, and init
+/// sets such a property only once.
 #[cfg(target_os = "android")]
 fn adopt_installed_version(props: &std::collections::HashMap<String, String>) -> Result<()> {
-    for name in BUILD_VERSION {
-        let value = props.get(name).with_context(|| format!("the installed system says no {name}"))?;
+    let values = skyward_info::keymint_props(props);
+    let set = [
+        ("ro.build.version.release", &values.release),
+        ("ro.build.version.release_or_codename", &values.release_or_codename),
+        ("ro.build.version.security_patch", &values.security_patch),
+        ("ro.vendor.build.security_patch", &values.vendor_security_patch),
+    ];
+    for (name, (value, source)) in set {
+        anyhow::ensure!(!value.is_empty(), "no value for {name}: the installed build and any skyward.keymint. override name none");
         if skyward_sys::prop(name).as_ref() != Some(value) {
             skyward_sys::set_prop(name, value)?;
         }
-        skyward_sys::kmsg(&format!("{name} is the installed system's {value}"))?;
+        skyward_sys::kmsg(&format!("{name}={value}, from {source}"))?;
     }
     Ok(())
 }

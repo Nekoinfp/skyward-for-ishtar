@@ -238,6 +238,85 @@ pub fn installed_props(slot: Slot) -> Result<HashMap<String, String>> {
     Ok(props)
 }
 
+/// The version values the key service has to see, and where each came from.
+///
+/// A ported system can carry another maker's `system` with this phone's
+/// `vendor` and `odm`. Reading these few names out of the merged set lets a
+/// later partition's build.prop replace the one the key service's own
+/// partitions made, which then makes the secure world see a build it does not
+/// know and refuse the keys. So they are read from the partitions that own
+/// them, in the order the phone's own recovery asks, and a `skyward.keymint.`
+/// property may name a value to use instead.
+///
+/// The names are the ones an installed system's KeyMint reads at start; a
+/// `release_or_codename` was added after release and is read here too.
+pub struct KeyMintProps {
+    pub release: (String, String),
+    pub release_or_codename: (String, String),
+    pub security_patch: (String, String),
+    pub vendor_security_patch: (String, String),
+}
+
+/// Read one name from the first of `files` that carries it. The result says
+/// the value and the file it came from, so the caller can tell what was read
+/// where a wrong value opens no data partition.
+fn from_files(files: &[&str], name: &str) -> Option<(String, String)> {
+    for file in files {
+        let Ok(text) = fs::read_to_string(file) else { continue };
+        for line in text.lines() {
+            let line = line.trim_end_matches('\r');
+            if let Some(value) = line.strip_prefix(&format!("{name}=")) {
+                if !value.is_empty() {
+                    return Some((value.to_string(), (*file).to_string()));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The installed system's KeyMint version values, read from its own
+/// build.prop files rather than from the merged set. A `skyward.keymint.`
+/// property, where set, wins over a file. Where a file names no value the
+/// running system's property is used, and where that is unset too the value
+/// is empty and the caller can say so.
+pub fn keymint_props(fallback: &HashMap<String, String>) -> KeyMintProps {
+    let system = [
+        "/system_root/system/build.prop",
+        "/system_root/build.prop",
+        "/system/system/build.prop",
+        "/system/build.prop",
+        "/mnt/system/system/build.prop",
+        "/mnt/system/build.prop",
+    ];
+    let vendor = ["/vendor/build.prop", "/vendor/etc/build.prop", "/mnt/vendor/build.prop", "/mnt/vendor/etc/build.prop"];
+    let get = |name: &str, override_name: &str, files: &[&str]| -> (String, String) {
+        if let Some(value) = skyward_sys::prop(override_name) {
+            if !value.is_empty() {
+                return (value, override_name.to_string());
+            }
+        }
+        if let Some(found) = from_files(files, name) {
+            return found;
+        }
+        let value = fallback.get(name).cloned().unwrap_or_default();
+        (value, "the installed system's merged properties".to_string())
+    };
+    let release = get("ro.build.version.release", "skyward.keymint.osver", &system);
+    // Android added release_or_codename after release; a build that does not
+    // carry it names the same version in both.
+    let release_or_codename = match get("ro.build.version.release_or_codename", "skyward.keymint.osver", &system) {
+        (value, source) if !value.is_empty() => (value, source),
+        _ => (release.0.clone(), format!("{} (no release_or_codename; the release is used)", release.1)),
+    };
+    KeyMintProps {
+        release,
+        release_or_codename,
+        security_patch: get("ro.build.version.security_patch", "skyward.keymint.ospatch", &system),
+        vendor_security_patch: get("ro.vendor.build.security_patch", "skyward.keymint.venpatch", &vendor),
+    }
+}
+
 fn read(path: impl AsRef<Path>) -> Result<String> {
     let p = path.as_ref();
     Ok(fs::read_to_string(p).with_context(|| format!("read {}", p.display()))?.trim().to_string())
