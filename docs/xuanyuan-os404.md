@@ -149,14 +149,16 @@ issue #55 的故障形态，为一个没人需要的节点加这个风险不划�
 
 | 范围 | 命令 | 结果 |
 | --- | --- | --- |
+| 整仓测试（CI 跑的就是这条） | `cargo test --workspace` | 全部通过，0 失败 |
+| 整仓 lint | `cargo clippy --workspace --all-targets -- -D warnings` | 退出码 0 |
+| 构建镜像 | `skyward-pack stock` + `skyward-pack recovery` | 通过，104,857,600 字节 |
 | LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 22 项通过（原有 7 项、扩容与双槽规划 15 项） |
-| sparse 解析与写入 | 独立 harness | 9 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充、chunk 数上界、跨缓冲的大 chunk、12 轮确定性随机构造） |
-| Android 全工作区 | `cargo ndk -t arm64-v8a --platform 30 check --workspace --all-targets` | 通过 |
-| Android 全工作区 lint | `cargo ndk -t arm64-v8a --platform 30 clippy --workspace --all-targets -- -D warnings` | 通过，零告警 |
+| sparse 解析与写入 | `cargo test -p skyward-install sparse` | 9 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充、chunk 数上界、跨缓冲的大 chunk、12 轮确定性随机构造） |
+| Android 全工作区编译 | `cargo ndk -t arm64-v8a --platform 30 check/clippy --workspace --all-targets` | 通过，零告警 |
 
-上面四项都是在提交 `07bec16` 的干净工作树上跑的（`cargo` 退出码 0）。
-Windows 主机上跑不了整个 workspace 的 `cargo test`：`skyward-bootimg` 的 ramdisk 解包用的是
-Unix 专有接口，这与本次改动无关。CI 的 `ubuntu-24.04` 上会跑完整 `cargo test --workspace`。
+前三项是在 Linux（WSL 里的 Ubuntu 24.04，rustc 1.100.0）上跑的；为此在本机手工导入了
+一个 `ubuntu-base` 24.04 rootfs 并装了 NDK r29 与 `cargo-ndk 4.1.2`。
+Windows 主机上跑不了整个 workspace：`skyward-bootimg` 的 ramdisk 解包用的是 Unix 专有接口。
 
 另外两项构建输入的核对：
 
@@ -171,8 +173,24 @@ Unix 专有接口，这与本次改动无关。CI 的 `ubuntu-24.04` 上会跑�
 底包地址本身返回 `200`、`Content-Length` 10382731686 字节。
 
 **没有验证的**：真机上的 `/data` 解密、OTA 安装、扩容后 mount、sparse 实际写盘。
-这些都需要一台已解锁的 xuanyuan 配合原厂 OS4.0.4.0 底包，本环境做不到。
-所以本分支**不宣称**“已完全适配”，只提供可编译、单元测试通过、且失败会安全中止的实现。
+这些都需要一台已解锁的 xuanyuan，本环境做不到。
+所以本分支**不宣称**“已完全适配”，只提供可编译、测试通过、镜像已实际构建并核对过内容、
+且失败会安全中止的实现。
+
+### 构建出来的那份镜像
+
+```
+skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img
+104,857,600 字节
+SHA-256 ef214f9c20aa366b255fe517a72e5c6ee9df2f2a3312bbac98cf6aa98bd3a558
+```
+
+打包器自己从 4.0.4.0 更新包里取出 recovery 分区并核对了哈希。镜像内容逐项核对过：
+形状与底包一致（`ANDROID!`、header_version 4、kernel 0、同尺寸）、
+`system/bin/recovery` 是 Skyward 本体（8,989,032 字节）、`system/bin/skyward` 与五个
+脚本命令链接都在、`skyward/device.toml` 与仓库里的逐字节相同、OMAPI 的二进制与
+VINTF 清单齐全、`prop.default` 末尾是 `ro.secure=0` / `ro.debuggable=1` 且已移除构建
+版本属性。**它没有在任何手机上运行过。**
 
 ## 六、明确没有做的部分
 
