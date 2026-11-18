@@ -38,6 +38,9 @@
      密钥文件是否存在（**只打印大小，不打印内容**）、密钥链各服务是否已注册、
      是否有未合并的更新、以及每个服务自己错误的最后 12 行。
    - 全部只读；每一项单独探测，探不到就写「探不到」，不会因为一项失败就停下。
+   - 电脑上还有 `tools/collect-report.sh`：它把 `skyward check`、`dmesg`、
+     `recovery.log`、每个服务的日志、mounts、vendor/odm fstab、属性、模块列表
+     一次收进一个文本文件（**不含密钥内容**，密钥只列文件名和大小），适合直接贴出去。
 
 上游 issue #64 记录的直接原因是 `keymint` 缺 `libvndksupport.so`；适配分支已经通过
 `provide_system_libraries()` 从已安装系统补 `libvndksupport.so` 与 `libdl_android.so`，
@@ -256,6 +259,8 @@ target/release/skyward-pack recovery \
    ```
    它把槽位、底包、已装系统、`/data` 表项、密钥文件大小、密钥链服务是否注册、
    更新状态，以及每个服务自己错误的最后几行一次打印出来。**这份输出就是排查时最该贴的。**
+   要更全的材料，在电脑上跑 `tools/collect-report.sh`，它会连 `dmesg` 和
+   `recovery.log` 一起收进一个文件。
    然后看 `/skyward/run/recovery.log`
    - 期望 `keymint` / `gatekeeper` 注册，`/dev/block/dm-* /data f2fs rw`
    - 输锁屏密码后 `/sdcard` 可读

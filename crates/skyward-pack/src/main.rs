@@ -160,6 +160,11 @@ fn main() -> Result<()> {
             for command in paths::COMMANDS {
                 rd.link(command, recovery)?;
             }
+            // And the recovery's own commands need a name of their own: what
+            // this binary does with its arguments is decided by the name it
+            // was started as, so `recovery` starts the service and only
+            // another name reaches `info`, `check`, `lp` and the rest.
+            rd.link(paths::TOOL, recovery)?;
             // The second system's first program: it runs before any library
             // is there to load, so it is given a place of its own.
             put(&mut rd, paths::SYSTEM_INIT, 0o755, read(&system_init)?)?;

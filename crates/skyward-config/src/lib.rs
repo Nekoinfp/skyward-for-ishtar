@@ -31,6 +31,12 @@ pub mod ramdisk {
     /// service binary beside it, which runs the command it is started as.
     pub const COMMANDS: [&str; 5] =
         ["system/bin/7za", "system/bin/avbctl", "system/bin/resetprop", "system/bin/unzip", "system/bin/zstd"];
+    /// The name the recovery's own commands are run under, such as
+    /// `skyward check`: a link to the same binary, because what it does with
+    /// its arguments is decided by the name it was started as — started as
+    /// `recovery` it is the service, and only another name reaches its
+    /// subcommands.
+    pub const TOOL: &str = "system/bin/skyward";
     /// The first property file init loads in recovery mode.
     pub const PROP_DEFAULT: &str = "prop.default";
     /// The scheduling profiles libprocessgroup reads.
@@ -770,6 +776,11 @@ mod tests {
         for command in ramdisk::COMMANDS {
             assert_eq!(folder(command), folder(ramdisk::RECOVERY), "{command}");
         }
+        assert_eq!(
+            folder(ramdisk::TOOL),
+            folder(ramdisk::RECOVERY),
+            "the name the recovery's own commands are run under"
+        );
     }
 
     #[test]
