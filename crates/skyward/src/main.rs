@@ -682,8 +682,6 @@ fn what_the_services_said() -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
-
-
 fn lp(super_dev: &Path, slot: Option<u32>) -> Result<()> {
     let slot = match slot {
         Some(n) => n,

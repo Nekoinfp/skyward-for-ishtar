@@ -73,6 +73,28 @@
    两个底包在这四个属性上的差别也确认了：4.0.0.18 是 `2026-09-01`，4.0.4.0 是
    `2026-10-01`。
 
+4. **配置里点名的内核模块在固件里都真实存在。** 从 4.0.4.0 底包里取出
+   `vendor_dlkm`（87,343,104 字节，391 个模块）与 `system_dlkm`（15,282,176 字节）
+   挂载后逐个核对：
+
+   | 模块 | 在哪 |
+   | --- | --- |
+   | `synaptics_tcm2`（触摸） | `vendor_dlkm/lib/modules/` |
+   | `stm_st54se_gpio`、`stm_nfc_i2c`（eSE） | `vendor_dlkm/lib/modules/` |
+   | `qca_cld3_peach_v2`（WLAN） | `vendor_dlkm/lib/modules/` |
+   | `rfkill`（cfg80211 要的） | `system_dlkm/flatten/lib/modules/` |
+
+   五个都不在 `modules.blocklist` 里，两个 peach 驱动都在 `modules.load` 里。
+   打出来的镜像根目录确实有 `vendor_dlkm` 与 `system_dlkm` 两个目录——
+   `skyward_vab::partitions::mount_point` 会把分区挂在根目录同名目录上，
+   而 `skyward_modules::source_dir` 找的是 `/vendor_dlkm/lib/modules` 与
+   `/system_dlkm/flatten/lib/modules`，两边对得上。
+
+5. **模块或服务起不来不会让 recovery 起不来。** `prepare()` 把 super 挂载与
+   `bring_up` 的失败都写进内核日志（"partitions not mounted" /
+   "devices not brought up"），界面照常显示。所以这台的失败表现应该是
+   "密钥服务未注册"，而不是黑屏——`skyward check` 正是为此写的。
+
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
 `crates/skyward-lp`：
