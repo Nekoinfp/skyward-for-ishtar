@@ -212,7 +212,64 @@ remembering the decrypt password is on, and no credential is kept
 这是设计行为，不是缺陷：FBE 的元数据密钥要用用户凭据解包。
 （凭据没有任何一条被记录，`skyward check` 也只列密钥文件名和大小、不读内容。）
 
-### 真机第二轮：只读命令与硬件
+### 真机第二轮：直接问 HAL，以及界面
+
+前两轮只证明"服务注册了"。这一轮**直接向三个 HAL 提问**，答案比注册更有分量。
+
+**KeyMint 说出了它被告诉的版本——这是整个适配最关键的一条**
+
+```
+keymint Keymint HAL: 3 version 3 at security level 1
+  tag 805307073 (OS_VERSION)        = 170000      ← Android 17
+  tag 805307074 (OS_PATCHLEVEL)     = 202610      ← 2026-10
+  tag 805307086 (VENDOR_PATCHLEVEL) = 20261001
+```
+
+安全世界被告知的是**已安装系统的 Android 17 / 补丁 2026-10**，不是 recovery 自己那套
+过时的 15。打包器剔掉版本属性、由 `adopt_installed_version` 写入、`environment::pin()`
+重启 keymint 这一整套设计，在真机上成立。密钥被拒的那类失败（补丁级别被读旧）
+因此不会发生。
+
+**Weaver 与 Gatekeeper 也都应答**
+
+```
+skyward weaver     → the weaver has 128 slots, keeps keys of 16 bytes and values of 16 bytes
+skyward gatekeeper → the credential service answers for android.hardware.gatekeeper.IGatekeeper
+                     it serves version 1 of that interface
+                     问一个不属于任何人的凭据：the secure world does not recognise that credential
+```
+
+gatekeeper 对"不存在的凭据"给出正确的拒绝，说明它不只是注册了，而是**在处理请求**。
+
+**界面：用 `skyward capture` 取画面，再与离线预览比对**
+
+recovery 里没有 `fb0`，但 `skyward capture` 从 `/dev/dri/card0` 读出整个画面
+（1440×3200 RGBA，18,432,000 字节）。把它和 `skyward-preview` 渲染的 244 张页面逐一比对：
+
+| 页面 | 平均差异（/255） |
+| --- | --- |
+| **112-home-keys-dark** | **6.66** |
+| 187-home-title-going-dark | 10.56 |
+| 其余 | ≥ 10.85 |
+
+**真机画面就是深色主页，与离线渲染同一页的差异只有 6.66/255**——渲染管线
+（DRM/KMS、字体、布局）与设计一致。
+
+**一条要注意的行为：`skyward data` 不是只读的**
+
+```
+Info: Automatic fix mode enabled.
+…
+Info: checkpoint stop reason: shutdown(229)
+Info: total FS sectors = 125098491 (488665 MB)
+Aborted
+```
+
+它调用了 `fsck.f2fs` 的**自动修复模式**，随后中止。事后核过：系统能正常启动、
+`/data` 仍是 477G/366G（与之前完全一致）、`/data/media/0` 内容不变——**数据未受影响**。
+但这条命令不该被当成"只看不改"，文档里已注明。
+
+### 真机第三轮：只读命令与硬件
 
 修好之后又在真机上跑了几个**只读**子命令，结果都落在预期上。
 
@@ -292,7 +349,7 @@ partitions = 141 under /dev/block/by-name
 | OTA 安装、切槽、开机 | 需要设备，且要冒失败风险 |
 | 逻辑分区扩容后能否挂载 | 需要设备（`super` 元数据改动不可逆，先备份） |
 | sparse super 实际写盘 | 需要设备 |
-| 触摸是否真的能用、界面各页是否正常 | 需要人看着屏幕 |
+| 触摸是否真的能用 | 需要人看着屏幕（界面本身已确认：真机画面与离线预览 `112-home-keys-dark` 差异 6.66/255） |
 | 压缩快照/增量 OTA | 未实现。**但不是手机不支持**：内核已编入 `dm-user`，系统的 `snapuserd` 是静态二进制，两者都在。缺的是 recovery 侧的控制逻辑；**协议已查清并与本机 daemon 核对过**（12/13 控制消息匹配），详见 `docs/vabc-design.md` |
 | 非 A/B 更新包 | 未实现：xuanyuan 是 A/B 机型，此类包用不上；只加了"包声明了别的机型就拒绝"的安全门 |
 
