@@ -16,7 +16,7 @@
 | --- | --- |
 | 镜像 | `skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img` |
 | 大小 | 104,857,600 字节（与底包 recovery 分区同尺寸） |
-| SHA-256 | `f2a160704717b317e1532f16c288ad50ee33d33b6057a4e2fd10ecb35e084a84` |
+| SHA-256 | `60379dbb7101b1d10d506a951ad47e461d58e295e7c569b9c38130e1309882d8` |
 | 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,256,277 字节 |
 | 内含 recovery 本体 | 8994312 字节，AArch64 ELF |
 | 底包 | OS4.0.4.0.XOACNXM，recovery 分区 SHA-256 `55f491052a360bc15362fd80c8bd2dd0912b289e1653f2bd7f9c5a12e7fea27b`（打包器自行核对） |
@@ -265,9 +265,22 @@ Info: total FS sectors = 125098491 (488665 MB)
 Aborted
 ```
 
-它调用了 `fsck.f2fs` 的**自动修复模式**，随后中止。事后核过：系统能正常启动、
-`/data` 仍是 477G/366G（与之前完全一致）、`/data/media/0` 内容不变——**数据未受影响**。
-但这条命令不该被当成"只看不改"，文档里已注明。
+它调用的是 `fsck.f2fs` 的**自动修复模式**（`-a`）——这正是 Android 自己在挂载带
+`check` 标志的文件系统时做的，所以这一段不是缺陷。随后 `fsck.f2fs` **自己中止了**
+（不是 Rust panic：`data` 路径里的 `unwrap`/`panic` 全在测试里）。离线无法定位，
+未修复，记在这里。
+
+事后核过：系统能正常启动、`/data` 仍是 477G/366G（与之前完全一致）、
+`/data/media/0` 内容不变——**数据未受影响**。
+
+**`skyward check` 现在会直说数据分区开没开**（这一轮补上的）：
+
+```
+  the data partition: open, its files can be read
+  the data partition: closed, so nothing in it can be read yet
+```
+
+真机上第二次启动那种"服务全注册、但 `/data` 没挂"的状态，现在一眼就能看出来。
 
 ### 真机第三轮：只读命令与硬件
 
