@@ -111,7 +111,6 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::WlanNetwork => wlan_network(cx),
         Screen::WlanAdd => wlan_add(cx),
         Screen::PowerOff => power_off(cx),
-        Screen::Plugins => plugins(cx),
         Screen::Vbmeta => vbmeta(cx),
     }
 }
@@ -480,11 +479,8 @@ pub fn settings(cx: &Ctx) -> Frame {
         y = widgets::footnote(&mut c, t, f, rows.bottom, note);
     }
     y = widgets::section(&mut c, t, f, y, l.pick(["调试", "偵錯", "Debugging"]));
-    let debug = widgets::list(&mut c, t, f, y, &[
-        Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
-        Row::new(l.pick(PLUGINS)).icon(PURPLE, Icon::More),
-    ]);
-    out.extend(hits(&debug.rows, &[Action::Open(Screen::Terminal), Action::Open(Screen::Plugins)]));
+    let debug = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal)]);
+    out.extend(hits(&debug.rows, &[Action::Open(Screen::Terminal)]));
     y = widgets::section(&mut c, t, f, debug.bottom, l.pick(["关于", "關於", "About"]));
     let mut rows = vec![Row::new(l.pick(ABOUT)).trail(Trail::Value(VERSION))];
     let mut opens = vec![Action::Open(Screen::About)];
@@ -630,7 +626,7 @@ pub fn mount(cx: &Ctx) -> Frame {
 }
 
 /// Who made the recovery, as the About page names them under its version.
-const AUTHOR: &str = "© 2026 Kirk Lin & 大口吃饭";
+const AUTHOR: &str = "© 2026 Kirk Lin & 澪洛依";
 
 /// About this device, modelled on the stock「我的设备」: the wordmark, the
 /// version and its author over a moving colour field, and the summary,
@@ -1092,14 +1088,14 @@ pub fn install(cx: &Ctx) -> Frame {
     // A phone that can hold a second system installs one from here too.
     let what = l.pick(match cx.state.dual_boot {
         true => [
-            "支持安装 A/B 完整更新包、带安装脚本的刷机包和第二系统的安装包，以及刷入 boot、init_boot、vendor_boot、recovery、dtbo、vbmeta、super 分区镜像。系统更新将安装到另一个槽位，重启后从该槽位启动；第二系统安装在 data 分区中，可在「双系统」中切换。选择文件时仅列出文件夹以及 .zip、.img 文件。",
-            "支援安裝 A/B 完整更新檔、帶有安裝指令碼的刷機包和第二系統的安裝檔，以及刷入 boot、init_boot、vendor_boot、recovery、dtbo、vbmeta、super 分割區映像檔。系統更新將安裝到另一個槽位，重新啟動後從該槽位啟動；第二系統安裝在 data 分割區中，可在「雙系統」中切換。選擇檔案時僅列出資料夾以及 .zip、.img 檔案。",
-            "Installs A/B full OTA packages, flashable zips with an install script and second systems' packages, and flashes boot, init_boot, vendor_boot, recovery, dtbo, vbmeta and super partition images. A system update installs to the other slot, which starts after a reboot; a second system installs into the data partition, and Dual boot switches to it. Choosing a file lists only folders and .zip and .img files.",
+            "支持安装 A/B 完整更新包、带安装脚本的刷机包和第二系统的安装包，以及刷入 boot、init_boot、vendor_boot、recovery、dtbo、vbmeta 分区镜像。系统更新将安装到另一个槽位，重启后从该槽位启动；第二系统安装在 data 分区中，可在「双系统」中切换。选择文件时仅列出文件夹以及 .zip、.img 文件。",
+            "支援安裝 A/B 完整更新檔、帶有安裝指令碼的刷機包和第二系統的安裝檔，以及刷入 boot、init_boot、vendor_boot、recovery、dtbo、vbmeta 分割區映像檔。系統更新將安裝到另一個槽位，重新啟動後從該槽位啟動；第二系統安裝在 data 分割區中，可在「雙系統」中切換。選擇檔案時僅列出資料夾以及 .zip、.img 檔案。",
+            "Installs A/B full OTA packages, flashable zips with an install script and second systems' packages, and flashes boot, init_boot, vendor_boot, recovery, dtbo and vbmeta partition images. A system update installs to the other slot, which starts after a reboot; a second system installs into the data partition, and Dual boot switches to it. Choosing a file lists only folders and .zip and .img files.",
         ],
         false => [
-            "支持安装 A/B 完整更新包和带安装脚本的刷机包，以及刷入 boot、init_boot、vendor_boot、recovery、dtbo、vbmeta、super 分区镜像。系统更新将安装到另一个槽位，重启后从该槽位启动。选择文件时仅列出文件夹以及 .zip、.img 文件。",
-            "支援安裝 A/B 完整更新檔和帶有安裝指令碼的刷機包，以及刷入 boot、init_boot、vendor_boot、recovery、dtbo、vbmeta、super 分割區映像檔。系統更新將安裝到另一個槽位，重新啟動後從該槽位啟動。選擇檔案時僅列出資料夾以及 .zip、.img 檔案。",
-            "Installs A/B full OTA packages and flashable zips with an install script, and flashes boot, init_boot, vendor_boot, recovery, dtbo, vbmeta and super partition images. A system update installs to the other slot, which starts after a reboot. Choosing a file lists only folders and .zip and .img files.",
+            "支持安装 A/B 完整更新包和带安装脚本的刷机包，以及刷入 boot、init_boot、vendor_boot、recovery、dtbo、vbmeta 分区镜像。系统更新将安装到另一个槽位，重启后从该槽位启动。选择文件时仅列出文件夹以及 .zip、.img 文件。",
+            "支援安裝 A/B 完整更新檔和帶有安裝指令碼的刷機包，以及刷入 boot、init_boot、vendor_boot、recovery、dtbo、vbmeta 分割區映像檔。系統更新將安裝到另一個槽位，重新啟動後從該槽位啟動。選擇檔案時僅列出資料夾以及 .zip、.img 檔案。",
+            "Installs A/B full OTA packages and flashable zips with an install script, and flashes boot, init_boot, vendor_boot, recovery, dtbo and vbmeta partition images. A system update installs to the other slot, which starts after a reboot. Choosing a file lists only folders and .zip and .img files.",
         ],
     });
     let y = widgets::footnote(&mut c, t, f, methods.bottom, what);
@@ -1125,9 +1121,9 @@ pub fn install(cx: &Ctx) -> Frame {
     // still checks signatures, and an install script is an arbitrary
     // program that may or may not disable them for itself.
     let avb = Row::new(l.pick([
-        "刷入后自动禁用 AVB2.0",
-        "刷入後自動停用 AVB2.0",
-        "Disable AVB2.0 after flashing",
+        "刷入 ROM 后自动禁用 AVB 校验",
+        "刷入 ROM 後自動停用 AVB 驗證",
+        "Disable AVB checks after a ROM is installed",
     ]))
     .switch(cx.state.disable_avb);
     let rows = widgets::list(&mut c, t, f, y + t.m.card_gap, &[avb]);
@@ -1284,6 +1280,13 @@ fn pick_title(l: Lang, pick: Pick, current: Option<Slot>) -> String {
     }
 }
 
+/// A raw super image: the one partition `super`, and no slots of its own. The
+/// installer writes the whole partition and ignores the slot picked, so the
+/// page does not offer one.
+fn super_image(partitions: &[&'static str]) -> bool {
+    matches!(partitions, ["super"])
+}
+
 /// Words the installing page says of more than one of its steps.
 const SWITCHING_USB: Text = ["正在切换 USB 模式", "正在切換 USB 模式", "Switching USB mode"];
 const READING_FILE: Text = ["正在读取文件", "正在讀取檔案", "Reading the file"];
@@ -1293,6 +1296,14 @@ const RUN_ON_COMPUTER: Text = ["在电脑上运行", "在電腦上執行", "Run 
 const KEEP_CABLE: Text = ["读取完成前，请不要断开数据线。", "讀取完成前，請不要拔除傳輸線。", "Keep the cable in until it's read."];
 const KEEP_DRIVE: Text = ["读取完成前，请不要拔出 U 盘。", "讀取完成前，請不要拔出 USB 隨身碟。", "Keep the USB drive in until it's read."];
 const GETTING_READY: Text = ["正在准备", "正在準備", "Getting ready"];
+/// What flashing a raw super image does, which is not like the other
+/// partitions: the whole of it is written, and what is inside it is mapped
+/// only at the next start.
+const SUPER_NOTE: Text = [
+    "将写入整个 super 分区，其中的逻辑分区要重启手机后才会重新映射。刷入完成后请重启手机。",
+    "將寫入整個 super 分割區，其中的邏輯分割區要重新啟動手機後才會重新對應。刷入完成後請重新啟動手機。",
+    "The whole super partition is written, and the logical partitions inside it are mapped anew only when the phone next starts. Restart the phone once it's flashed.",
+];
 
 /// Installing a package step by step: receiving what the computer sends
 /// with `adb sideload`, or reading the file chosen, then installing it.
@@ -1421,7 +1432,11 @@ pub fn installing(cx: &Ctx) -> Frame {
             let parts = widgets::list(&mut c, t, f, y, &rows);
             let choose: Vec<Action> = (0..choice.partitions.len()).map(Action::FlashPartition).collect();
             out.extend(hits(&parts.rows, &choose));
-            let above = if choice.kind.unslotted() {
+            // A raw super image has no slots of its own: the installer writes
+            // the whole partition and ignores the slot picked, so the page
+            // does not ask for one, and says what that means below the swipe.
+            let super_only = super_image(&choice.partitions);
+            let bottom = if super_only {
                 parts.bottom
             } else {
                 let y = widgets::section(&mut c, t, f, parts.bottom, l.pick(["槽位", "槽位", "Slot"]));
@@ -1433,8 +1448,13 @@ pub fn installing(cx: &Ctx) -> Frame {
                 picks.bottom
             };
             let (label, danger) = confirm_label(Confirm::Flash, cx.state);
-            let track = widgets::confirm(&mut c, t, f, above + t.m.dp(28.0), label, danger, s.confirm);
+            let track = widgets::confirm(&mut c, t, f, bottom + t.m.dp(28.0), label, danger, s.confirm);
             out.push(Hit { rect: track, action: Action::Confirm(Confirm::Flash) });
+            let y = if super_only {
+                widgets::footnote(&mut c, t, f, track.y + track.h, l.pick(SUPER_NOTE))
+            } else {
+                track.y + track.h
+            };
             let note = l.pick(match s.source {
                 Source::Computer => [
                     "刷入将覆盖分区中的原有内容。返回将取消刷入，并结束电脑上的 adb sideload。",
@@ -1452,7 +1472,7 @@ pub fn installing(cx: &Ctx) -> Frame {
                     "Flashing writes over what the partition holds. Going back cancels it.",
                 ],
             });
-            widgets::footnote(&mut c, t, f, track.y + track.h, note)
+            widgets::footnote(&mut c, t, f, y, note)
         }
         Install::Confirming { version, wipe } => {
             let (title, color, icon, detail, which) = if *wipe {
@@ -1663,6 +1683,17 @@ fn capitalized(l: Lang, phrase: &str) -> String {
     }
 }
 
+/// What a flash that ended says. A raw super image is written whole and has no
+/// slots, which the installer reports as none: said without one, rather than
+/// with a slot list that is not there.
+fn flashed_detail(l: Lang, partition: &str, slots: &[Slot]) -> String {
+    if slots.is_empty() {
+        return tr!(l, "{partition} 已刷入。", "{partition} 已刷入。", "Flashed to {partition}.");
+    }
+    let slots = fmt::slots(l, slots);
+    tr!(l, "{partition} 已刷入{slots}。", "{partition} 已刷入{slots}。", "Flashed to {partition} in {slots}.")
+}
+
 /// How an install ended, and where to go from there: another package from
 /// the computer, or back to choose another file.
 fn finished(
@@ -1702,12 +1733,7 @@ fn finished(
             afterwards_of(c, cx, y, true)
         }
         Outcome::Flashed { partition, slots } => {
-            let slots = fmt::slots(l, slots);
-            let detail = if *partition == "super" {
-                l.pick(["super 已刷入，两个槽位的逻辑分区均已覆盖，请立即重启。", "super 已刷入，兩個槽位的邏輯分割區均已覆寫，請立即重新啟動。", "Super flashed over both slots' logical partitions. Reboot now."]).to_string()
-            } else {
-                tr!(l, "{partition} 已刷入{slots}。", "{partition} 已刷入{slots}。", "Flashed to {partition} in {slots}.")
-            };
+            let detail = flashed_detail(l, partition, slots);
             let y = widgets::list(c, t, f, top, &[standing(l.pick(["刷入成功", "刷入成功", "Flashed"]), GREEN, Icon::Install, &detail)]).bottom;
             let mut rows = vec![restart];
             let mut acts = vec![Action::RebootTo(Target::System)];
@@ -2413,7 +2439,6 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
-        Row::new(l.pick(["宽容内核", "寬容核心", "Permissive kernel"])).icon(ORANGE, Icon::Shield),
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
         Row::new(l.pick(LOGS)).icon(ORANGE, Icon::Log),
         Row::new(l.pick(UPDATE)).icon(GREEN, Icon::Layers).trail(Trail::Value(update_value(cx))),
@@ -2423,7 +2448,6 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Files),
         Action::Open(Screen::Terminal),
         Action::Open(Screen::Relabel),
-        Action::Permissive,
         Action::Open(Screen::Filesystems),
         Action::Open(Screen::Logs),
         Action::Open(Screen::Update),
@@ -4608,67 +4632,6 @@ pub fn power_off(cx: &Ctx) -> Frame {
 
 const POWER_OFF: Text = ["关机", "關機", "Power off"];
 
-/// The plugins kept on the phone: where they go, what one has to be, and
-/// what was found. Nothing runs a plugin yet, and the page says so rather
-/// than showing switches for something that would do nothing.
-pub fn plugins(cx: &Ctx) -> Frame {
-    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
-    let mut c = long_page(cx);
-    let mut out = Vec::new();
-    let top = t.m.content_top;
-    let mut y = widgets::section_first(&mut c, t, f, top, l.pick(["已安装的插件", "已安裝的外掛", "Plugins installed"]));
-    match &s.plugins {
-        None => y = widgets::footnote(&mut c, t, f, y, l.pick(["正在读取插件目录", "正在讀取外掛目錄", "Reading the plugins folder"])),
-        Some(Err(why)) => y = widgets::footnote(&mut c, t, f, y, &tr!(l, "无法读取插件目录：{why}", "無法讀取外掛目錄：{why}", "The plugins folder can't be read: {why}")),
-        Some(Ok(rows)) if rows.is_empty() => {
-            y = widgets::footnote(&mut c, t, f, y, l.pick(["还没有安装任何插件。", "還沒有安裝任何外掛。", "No plugins are installed yet."]))
-        }
-        Some(Ok(rows)) => {
-            let titles: Vec<String> = rows
-                .iter()
-                .map(|r| match &r.manifest {
-                    Ok(p) => p.title.clone().unwrap_or_else(|| r.name.clone()),
-                    Err(_) => r.name.clone(),
-                })
-                .collect();
-            let subs: Vec<String> = rows
-                .iter()
-                .map(|r| match &r.manifest {
-                    Ok(p) => p.version.as_ref().map_or_else(|| l.pick(["已安装", "已安裝", "Installed"]).to_string(), |v| tr!(l, "版本 {v}", "版本 {v}", "Version {v}")),
-                    Err(why) => why.clone(),
-                })
-                .collect();
-            let list: Vec<Row> = titles.iter().zip(&subs).map(|(t, s)| Row::new(t).icon(PURPLE, Icon::More).subtitle(s).trail(Trail::None)).collect();
-            let drawn = widgets::list(&mut c, t, f, y, &list);
-            let opens: Vec<Action> = (0..rows.len()).map(Action::OpenPlugin).collect();
-            out.extend(hits(&drawn.rows, &opens));
-            y = drawn.bottom;
-        }
-    }
-    // What a plugin is, so that one can be made against this page before
-    // anything runs it.
-    y = widgets::section(&mut c, t, f, y, l.pick(["什么是插件", "什麼是外掛", "What a plugin is"]));
-    let where_ = l.pick([
-        "插件是一个文件夹，放在内部存储的 Skyward/plugins 中，里面有一个 plugin.json 写明名字、版本和用途。",
-        "外掛是一個資料夾，放在內部儲存空間的 Skyward/plugins 中，裡面有一個 plugin.json 寫明名稱、版本和用途。",
-        "A plugin is a folder in Skyward/plugins on internal storage, holding a plugin.json that names it, its version and what it is for.",
-    ]);
-    let what = l.pick([
-        "本版本只读取并列出插件，还不会运行它们。这是一个为之后的插件功能留出的位置。",
-        "本版本只讀取並列出外掛，還不會執行它們。這是一個為之後的外掛功能留出的位置。",
-        "This release only reads and lists plugins; it does not run them yet. It is the place the plugin feature will grow into.",
-    ]);
-    y = widgets::footnote(&mut c, t, f, y, where_);
-    y = widgets::footnote(&mut c, t, f, y, what);
-    // What can be done today, which is looking at the folder.
-    let open = widgets::list(&mut c, t, f, y + t.m.card_gap, &[Row::new(l.pick(["在文件管理中打开插件目录", "在檔案管理中開啟外掛目錄", "Open the plugins folder in File manager"])).trail(Trail::None)]);
-    out.extend(hits(&open.rows, &[Action::OpenPluginFolder]));
-    y = open.bottom;
-    Frame::new(t, fit(c, t, y), out, l.pick(PLUGINS), top)
-}
-
-const PLUGINS: Text = ["插件", "外掛", "Plugins"];
-
 /// The slot's vbmeta image: what it is, the copies kept of it, making one,
 /// and putting one back. A copy older than the phone's rollback index is
 /// refused rather than written, since writing it is what stops a phone
@@ -4895,5 +4858,25 @@ mod tests {
     fn a_phrase_that_opens_a_line_starts_with_a_capital_in_english() {
         assert_eq!(capitalized(Lang::En, "empties the data partition"), "Empties the data partition");
         assert_eq!(capitalized(Lang::Hans, "清空 data 分区"), "清空 data 分区");
+    }
+
+    #[test]
+    fn only_a_super_image_on_its_own_has_no_slots_to_pick() {
+        assert!(super_image(&["super"]), "the whole of the dynamic partitions, in one partition");
+        assert!(!super_image(&["super", "boot"]), "an image that also names another partition is not that");
+        assert!(!super_image(&["boot"]));
+        assert!(!super_image(&[]), "an image with nowhere to go asks for nothing, rather than for a slot");
+    }
+
+    #[test]
+    fn a_flash_with_no_slot_is_said_without_one() {
+        assert_eq!(flashed_detail(Lang::Hans, "super", &[]), "super 已刷入。");
+        assert_eq!(flashed_detail(Lang::Hant, "super", &[]), "super 已刷入。");
+        assert_eq!(flashed_detail(Lang::En, "super", &[]), "Flashed to super.");
+        // An image that does go to slots reads as it did.
+        assert_eq!(flashed_detail(Lang::Hans, "boot", &[Slot::A, Slot::B]), "boot 已刷入槽位 A 和 B。");
+        assert_eq!(flashed_detail(Lang::Hant, "recovery", &[Slot::B]), "recovery 已刷入槽位 B。");
+        assert_eq!(flashed_detail(Lang::En, "boot", &[Slot::A]), "Flashed to boot in slot A.");
+        assert_eq!(flashed_detail(Lang::En, "boot", &[Slot::A, Slot::B]), "Flashed to boot in slots A and B.");
     }
 }
