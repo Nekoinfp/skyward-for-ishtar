@@ -15,6 +15,7 @@ pub use partitions::{
     slot_sizes, snapshots_mapped, start_merge, unmap_slot, unmap_whole, unmount_one, unmount_partitions, Mounted, Mounts, SlotMaps,
     Whole,
 };
+pub mod dmuser;
 pub use snapshots::Merge;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
