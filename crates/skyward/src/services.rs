@@ -330,7 +330,7 @@ fn run(s: &Service, who: &Credentials, sockets: &[Listening]) -> Result<String> 
 /// libraries where it names them, and as `who`.
 fn command(s: &Service, who: &Credentials, sockets: &[Listening]) -> Command {
     let mut cmd = Command::new(&s.path);
-    cmd.args(&s.args).current_dir("/").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.args(&s.args).current_dir("/").stdin(Stdio::null()).stdout(Stdio::null()).stderr(error_output(s));
     if !s.libraries.is_empty() {
         cmd.env("LD_LIBRARY_PATH", s.libraries.join(":"));
     }
@@ -357,6 +357,41 @@ fn command(s: &Service, who: &Credentials, sockets: &[Listening]) -> Command {
         })
     };
     cmd
+}
+
+/// Where the programs' own error output is kept.
+const ERROR_LOGS: &str = "/skyward/run/services";
+
+/// How much of one program's error output is kept before it starts again.
+const ERROR_LOG_BYTES: u64 = 64 << 10;
+
+/// Where the program's own error output goes.
+///
+/// A program that cannot start says why on its error output, and nothing else
+/// says it: a missing library reads `CANNOT LINK EXECUTABLE ...`, and a
+/// secure element's node that cannot be opened reads its errno there. A
+/// recovery that sent that to nothing left only "the service ended", which is
+/// the one thing the message was not.
+///
+/// It is a file rather than the kernel log because a program that talks a lot
+/// would push everything else out of it, and because a file can be read once
+/// the recovery is up: `adb shell cat /skyward/run/services/<program>.log`.
+/// A file it cannot make, or one that has grown past its limit, leaves the
+/// program's error output where it was rather than failing anything.
+fn error_output(s: &Service) -> Stdio {
+    let name = Path::new(&s.path).file_name().map_or_else(|| "service".to_string(), |n| n.to_string_lossy().into_owned());
+    let dir = Path::new(ERROR_LOGS);
+    if fs::create_dir_all(dir).is_err() {
+        return Stdio::null();
+    }
+    let path = dir.join(format!("{name}.log"));
+    if fs::metadata(&path).is_ok_and(|m| m.len() > ERROR_LOG_BYTES) {
+        let _ = fs::write(&path, b"");
+    }
+    match fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(file) => Stdio::from(file),
+        Err(_) => Stdio::null(),
+    }
 }
 
 /// Let the descriptors survive the exec that follows, in the child alone.

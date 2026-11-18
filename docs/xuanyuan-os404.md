@@ -26,6 +26,14 @@
 `provide_system_libraries()` 从已安装系统补 `libvndksupport.so` 与 `libdl_android.so`，
 并给服务补 `/vendor/lib64/hw` 等库路径。本分支沿用该做法，没有扩大范围。
 
+3. **服务的错误输出不再丢弃**（`crates/skyward/src/services.rs`）
+   - 之前每个服务都以 `stderr(Stdio::null())` 启动，于是
+     `CANNOT LINK EXECUTABLE … library "libvndksupport.so" not found` 这种唯一能定位问题的
+     一行被直接丢掉，日志里只剩「服务结束了」。上游 issue #64 是靠手动复现才找到缺库的。
+   - 现在写到 `/skyward/run/services/<程序名>.log`（追加，超过 64 KiB 时清空重写），
+     建立不了就退回 `null`，任何情况都不会让服务因此启动失败。
+   - 排查时直接：`adb shell cat /skyward/run/services/android.hardware.security.keymint-service-qti.log`
+
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
 `crates/skyward-lp`：
@@ -184,8 +192,14 @@ target/release/skyward-pack recovery \
 3. **解密**：进 recovery，看 `/skyward/run/recovery.log`
    - 期望 `keymint` / `gatekeeper` 注册，`/dev/block/dm-* /data f2fs rw`
    - 输锁屏密码后 `/sdcard` 可读
-   - 若失败，先看是不是 `CANNOT LINK EXECUTABLE`（缺库）还是
-     `the service refused the call`（安全元件/weaver），两者处理方式不同
+   - 服务起不来时先看 `/skyward/run/services/<程序名>.log`：
+     `CANNOT LINK EXECUTABLE` 是缺库，`the service refused the call` 是安全元件/weaver，
+     两者处理方式不同
+   - 也可以直接跑一次确认库路径：
+     ```sh
+     LD_LIBRARY_PATH=/system/lib64:/vendor/lib64:/vendor/lib64/hw:/mnt/system/system/lib64 \
+       timeout 3 /vendor/bin/hw/android.hardware.security.keymint-service-qti
+     ```
 4. **完整 OTA**：装一个 OS4.0.4.0 完整包，确认能写、能切槽、能起机。
 5. **逻辑分区扩容**（可选，风险最高）：
    - 先准备一个比现有 `system` 大的逻辑分区镜像
