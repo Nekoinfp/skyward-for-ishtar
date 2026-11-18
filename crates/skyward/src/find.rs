@@ -41,7 +41,7 @@ const MOST_DEPTH: usize = 12;
 /// the folders in the order the walk reached them.
 ///
 /// [`sort`]: skyward_ui::sort::sort
-pub fn find(root: &Path, query: &str, sort: SortKey) -> Result<Vec<Found>> {
+pub fn find(root: &Path, query: &str, sort: SortKey, read: &dyn Fn(&Path) -> Result<Option<FileRow>>) -> Result<Vec<Found>> {
     let needle = query.trim().to_lowercase();
     if needle.is_empty() {
         return Ok(Vec::new());
@@ -89,7 +89,7 @@ pub fn find(root: &Path, query: &str, sort: SortKey) -> Result<Vec<Found>> {
             if name.to_lowercase().contains(&needle) {
                 // Only what is shown is looked at closely: its size, its
                 // time and what kind of thing it is are what its row says.
-                if let Some(row) = crate::ui::read_row(&entry.path())? {
+                if let Some(row) = read(&entry.path())? {
                     here.push(row);
                 }
             }
@@ -119,6 +119,36 @@ pub fn find(root: &Path, query: &str, sort: SortKey) -> Result<Vec<Found>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use skyward_ui::app::FileKind;
+
+    /// What the file manager's own reader says of an entry, as much of it as a
+    /// search shows: the name, and what kind of thing it is.
+    fn row(path: &Path) -> Result<Option<FileRow>> {
+        let meta = match fs::symlink_metadata(path) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).with_context(|| format!("stat {}", path.display())),
+        };
+        let kind = if meta.file_type().is_symlink() {
+            FileKind::Link { target: fs::read_link(path)?.to_string_lossy().into_owned(), folder: false }
+        } else if meta.is_dir() {
+            FileKind::Folder { items: fs::read_dir(path).ok().map(|inside| inside.count()) }
+        } else if meta.is_file() {
+            FileKind::File
+        } else {
+            FileKind::Special
+        };
+        Ok(Some(FileRow {
+            name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+            kind,
+            size: meta.len(),
+            modified: 0,
+            mode: 0,
+            uid: 0,
+            gid: 0,
+        }))
+    }
+
 
     /// A tree under a folder of its own, gone at the end of the test.
     struct Tree(std::path::PathBuf);
@@ -151,7 +181,7 @@ mod tests {
         tree.file("DCIM/land.jpg");
         tree.file("notes.txt");
 
-        let found = find(&tree.0, "land", SortKey::Name).expect("a tree that reads");
+        let found = find(&tree.0, "land", SortKey::Name, &row).expect("a tree that reads");
         // The name is in the folder below the one searched, not the one
         // searched: that is the whole point of the walk.
         assert_eq!(found.len(), 1);
@@ -167,7 +197,7 @@ mod tests {
         tree.file("c/SEA.jpg");
         tree.file("c/sand.jpg");
 
-        let found = find(&tree.0, "sea", SortKey::Name).expect("a tree that reads");
+        let found = find(&tree.0, "sea", SortKey::Name, &row).expect("a tree that reads");
         let mut names: Vec<String> = found.iter().map(|f| f.entry.name.clone()).collect();
         names.sort();
         // Matched without case, anywhere in the name, in every folder.
@@ -186,7 +216,7 @@ mod tests {
 
         // What is under the folder that cannot be read is not found, and
         // the rest of the tree still is.
-        let found = find(&tree.0, "sea", SortKey::Name).expect("a tree that mostly reads");
+        let found = find(&tree.0, "sea", SortKey::Name, &row).expect("a tree that mostly reads");
         assert_eq!(found.len(), 1);
 
         let mut perms = fs::metadata(&shut).expect("the folder").permissions();
@@ -198,7 +228,7 @@ mod tests {
     fn a_query_with_nothing_in_it_finds_nothing() {
         let tree = Tree::made("empty");
         tree.file("sea.jpg");
-        assert!(find(&tree.0, "  ", SortKey::Name).expect("a tree that reads").is_empty());
+        assert!(find(&tree.0, "  ", SortKey::Name, &row).expect("a tree that reads").is_empty());
     }
 
     #[test]
@@ -207,7 +237,7 @@ mod tests {
         for i in 0..MOST_FOUND + 20 {
             tree.file(&format!("sea{}.jpg", i));
         }
-        let found = find(&tree.0, "sea", SortKey::Name).expect("a tree that reads");
+        let found = find(&tree.0, "sea", SortKey::Name, &row).expect("a tree that reads");
         assert_eq!(found.len(), MOST_FOUND);
     }
 
@@ -218,7 +248,7 @@ mod tests {
         fs::create_dir_all(tree.0.join("sea-folder")).expect("a folder to find");
         std::os::unix::fs::symlink("sea.jpg", tree.0.join("sea-link")).expect("a link to find");
 
-        let found = find(&tree.0, "sea", SortKey::Name).expect("a tree that reads");
+        let found = find(&tree.0, "sea", SortKey::Name, &row).expect("a tree that reads");
         let mut kinds: Vec<(&str, bool)> = found
             .iter()
             .map(|f| {

@@ -2791,7 +2791,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     // run cannot be held by a tree that never ends. Failing
                     // to walk it says so on the page; it does not end the run.
                     Effect::FindFiles { root, query, gen, sort } => {
-                        let found = crate::find::find(Path::new(&root), &query, sort).map_err(|e| format!("{e:#}"));
+                        let found = crate::find::find(Path::new(&root), &query, sort, &read_row).map_err(|e| format!("{e:#}"));
                         app.found_files(gen, found);
                     }
                     Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,

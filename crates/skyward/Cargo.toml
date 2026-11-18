@@ -21,6 +21,10 @@ skyward-info = { path = "../skyward-info" }
 skyward-install = { path = "../skyward-install" }
 skyward-sys = { path = "../skyward-sys" }
 skyward-lp = { path = "../skyward-lp" }
+# What an entry of a folder looks like, and the order a folder's own entries
+# are shown in: the search below a folder is a plain walking of the
+# filesystem, and is tried on the host.
+skyward-ui = { path = "../skyward-ui" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
@@ -36,7 +40,6 @@ skyward-files = { path = "../skyward-files" }
 zip = { version = "8.6.0", default-features = false }
 libc = { workspace = true }
 procfs = { version = "0.18.0", default-features = false }
-skyward-ui = { path = "../skyward-ui" }
 skyward-mtp = { path = "../skyward-mtp" }
 skyward-systems = { path = "../skyward-systems" }
 skyward-net = { path = "../skyward-net" }
