@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "android")]
 mod aod;
 mod art;
+// The two pieces of opening the phone's secure services that are not the// phone's own: what a hardware description says, and copying the libraries// the services load. Both are tried on the host, and both are used only where// the recovery service is built.
+#[cfg(any(target_os = "android", test))]
 mod framework;
+#[cfg(any(target_os = "android", test))]
 mod libraries;
 #[cfg(target_os = "android")]
 mod backup;
