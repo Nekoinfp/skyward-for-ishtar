@@ -419,7 +419,9 @@ fn flash_as<R: Read + Seek + Send>(
 /// start, one at its middle, and one at its end. No window reaches past the
 /// image's end, and an image too short to hold three of them is read whole.
 fn spans(end: u64, whole: bool, window: u64) -> Vec<(u64, u64)> {
-    if whole || end <= window.saturating_mul(3) {
+    // An image exactly three windows long holds three that meet end to end,
+    // so it is not too short to be read that way.
+    if whole || end < window.saturating_mul(3) {
         return vec![(0, end)];
     }
     vec![(0, window), (end / 2 - window / 2, window), (end - window, window)]

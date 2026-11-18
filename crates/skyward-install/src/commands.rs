@@ -226,7 +226,19 @@ fn copy(from: &mut dyn Read, to: &mut dyn Write) -> Result<u64, Failed> {
                 }
                 Ok(read) => filled += read,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(Failed::Reading(e)),
+                Err(e) => {
+                    // What came through before the failure is written before
+                    // the failure is told. A reader that refuses the last of
+                    // its input — a frame with something after it, a zip entry
+                    // whose checksum does not match — still gave everything
+                    // before that, and a command that stopped short owes the
+                    // script that ran it those bytes.
+                    if filled > 0 {
+                        to.write_all(&chunk[..filled]).map_err(Failed::Writing)?;
+                        copied += filled as u64;
+                    }
+                    return Err(Failed::Reading(e));
+                }
             }
         }
         to.write_all(&chunk).map_err(Failed::Writing)?;
