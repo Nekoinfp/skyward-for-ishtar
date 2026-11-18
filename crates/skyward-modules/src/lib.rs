@@ -225,4 +225,56 @@ mod tests {
     fn strips_paths_to_basenames() {
         assert_eq!(basename("kernel/drivers/foo/bar.ko"), "bar.ko");
     }
+
+    /// The dependency lines the Chinese build's own `modules.dep` carries for
+    /// the modules this phone's configuration loads, copied from the
+    /// OS4.0.4.0 package: the touch driver pulls four in, the secure
+    /// element's pulls four of its own, and two of them depend on nothing.
+    const SHIPPED_DEP: &str = "\
+/vendor/lib/modules/stm_st54se_gpio.ko:
+/vendor/lib/modules/synaptics_tcm2.ko: /vendor/lib/modules/gh_irq_lend.ko /vendor/lib/modules/xiaomi_touch.ko /vendor/lib/modules/panel_event_notifier.ko /vendor/lib/modules/gh_mem_notifier.ko
+/vendor/lib/modules/gh_irq_lend.ko:
+/vendor/lib/modules/xiaomi_touch.ko: /vendor/lib/modules/panel_event_notifier.ko
+/vendor/lib/modules/panel_event_notifier.ko:
+/vendor/lib/modules/gh_mem_notifier.ko:
+/vendor/lib/modules/stm_nfc_i2c.ko: /vendor/lib/modules/smcinvoke_dlkm.ko /vendor/lib/modules/mem_object.ko /vendor/lib/modules/si_core_module.ko /vendor/lib/modules/qseecom_proxy.ko
+/vendor/lib/modules/smcinvoke_dlkm.ko:
+/vendor/lib/modules/mem_object.ko:
+/vendor/lib/modules/si_core_module.ko:
+/vendor/lib/modules/qseecom_proxy.ko:
+";
+
+    fn graph_in(dir: &Path) -> ModuleGraph {
+        fs::write(dir.join("modules.dep"), SHIPPED_DEP).expect("write the table");
+        parse_dep(dir).expect("read the table")
+    }
+
+    #[test]
+    fn the_touch_driver_comes_after_the_four_it_depends_on() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let order = graph_in(dir.path()).load_order(&["synaptics_tcm2.ko".to_string()]);
+        let at = |name: &str| order.iter().position(|m| m == name).unwrap_or_else(|| panic!("{name} is not in {order:?}"));
+        for dependency in ["gh_irq_lend.ko", "xiaomi_touch.ko", "panel_event_notifier.ko", "gh_mem_notifier.ko"] {
+            assert!(at(dependency) < at("synaptics_tcm2.ko"), "{dependency} comes before the driver that needs it: {order:?}");
+        }
+        assert_eq!(order.len(), 5, "and nothing else is pulled in: {order:?}");
+        assert_eq!(*order.last().expect("a last"), "synaptics_tcm2.ko");
+    }
+
+    #[test]
+    fn a_module_that_depends_on_nothing_is_loaded_on_its_own() {
+        let dir = tempfile::tempdir().expect("a folder");
+        assert_eq!(graph_in(dir.path()).load_order(&["stm_st54se_gpio.ko".to_string()]), vec!["stm_st54se_gpio.ko"]);
+    }
+
+    #[test]
+    fn the_secure_elements_driver_pulls_in_the_four_below_it() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let order = graph_in(dir.path()).load_order(&["stm_nfc_i2c.ko".to_string()]);
+        assert_eq!(order.len(), 5, "{order:?}");
+        assert_eq!(*order.last().expect("a last"), "stm_nfc_i2c.ko");
+        for dependency in ["smcinvoke_dlkm.ko", "mem_object.ko", "si_core_module.ko", "qseecom_proxy.ko"] {
+            assert!(order.contains(&dependency.to_string()), "{dependency} is in {order:?}");
+        }
+    }
 }

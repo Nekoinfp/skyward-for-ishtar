@@ -177,6 +177,21 @@
    `mount_point()` / `source_dir()` 的假设一致。这两行真机文本已经作为回归用例
    进了 `crates/skyward-block/src/fstab.rs`（`the_table_the_phone_ships_is_read_as_the_phone_means_it`）。
 
+11. **要加载的模块，连依赖文件都齐。** 用固件自带的 `modules.dep` 解析每个模块的
+    **传递依赖**，再逐个确认 `.ko` 文件真的存在：
+
+   | 配置要加载的 | 连依赖一共 | 文件 |
+   | --- | --- | --- |
+   | `synaptics_tcm2` | 5 | 全在 |
+   | `stm_st54se_gpio` | 1 | 全在 |
+   | `stm_nfc_i2c` | 5 | 全在 |
+   | `rfkill` | 1 | 全在 |
+   | `qca_cld3_peach_v2` | 31 | 全在 |
+   | `qca_cld3_peach` | 31 | 全在 |
+
+   真机的依赖行也已作为回归用例进 `skyward-modules`（触摸驱动必须排在它依赖的
+   四个之后、`stm_st54se_gpio` 没有依赖、eSE 驱动带出 `qseecom_proxy` 等四个）。
+
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
 `crates/skyward-lp`：
