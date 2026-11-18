@@ -104,7 +104,21 @@ cargo run --release -p skyward-pack -- paths --config devices/xuanyuan.toml \
 
 ---
 
-## 四、尚未验证的部分
+## 四、已经查过、确认没问题的地方
+
+这些是查之前怀疑有问题、查完发现已经做对了的，写下来免得以后重复调查：
+
+| 怀疑 | 实际 |
+| --- | --- |
+| 手机上有未合并快照时，刷 super 或扩容会毁掉它 | 四处都会拒绝：`install_system`、`update_system`、刷 `ImageKind::Super`、`flash_logical`（`Refusal::Pending`）；脚本安装则在更新未完成时**不映射**该槽的分区 |
+| 被拒绝时用户不知道该干什么 | 提示是"{快照状态}。请重启到系统，完成上一次更新后重试"，中英繁体都有 |
+| 压缩快照更新失败时界面会让人以为在等 | 状态文案是"此类更新需在系统中合并，启动系统后将自动合并" |
+| 配置里点名的库路径漏了 `/odm/lib64` | 查过二进制依赖：`/odm/lib64` 里那几个 `libjc_keymint*` 属于 **StrongBox** 版 keymint，配置启动的是 TEE 版（链接 `/vendor/lib64/libqtikeymint.so`），不需要加 |
+| 两个 crate 各有一份"进程还在跑吗" | 确实重复。已合并为 `skyward_sys::running`，并补了真正起进程的测试 |
+
+---
+
+## 五、尚未验证的部分
 
 | 项 | 为什么 |
 | --- | --- |
@@ -117,7 +131,7 @@ cargo run --release -p skyward-pack -- paths --config devices/xuanyuan.toml \
 
 ---
 
-## 五、真机验证步骤
+## 六、真机验证步骤
 
 设备要求：已解锁的小米 15 Ultra，系统 OS4.0.4.0。
 
@@ -164,7 +178,7 @@ tools/collect-report.sh report.txt
 
 ---
 
-## 六、这份报告的边界
+## 七、这份报告的边界
 
 - 所有"实测"都指**在本机对固件文件与代码的核对**，不含真机运行。
 - 「配置里某个路径存在」证明的是**文件在**，不证明 HAL 能成功初始化——
