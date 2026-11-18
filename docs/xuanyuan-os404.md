@@ -132,14 +132,17 @@
 
    | 库 | 在已安装系统里的位置 |
    | --- | --- |
-   | `libvndksupport.so` | `/system/lib64/libvndksupport.so` |
-   | `libdl_android.so` | `/system/lib64/**bootstrap**/libdl_android.so` |
+   | `libvndksupport.so` | `/system/lib64/libvndksupport.so`（真文件，51,504 字节） |
+   | `libdl_android.so` | `/system/lib64/libdl_android.so` 是**符号链接**，指向 `/apex/com.android.runtime/lib64/bionic/libdl_android.so`；真实副本在 `/system/lib64/bootstrap/libdl_android.so`（34,848 字节） |
 
-   注意第二个**只在 `bootstrap` 子目录**里。`provide_system_libraries()`
-   （`crates/skyward/src/secure.rs`）是**逐个库**依次在
-   `/mnt/system/system/lib64` 与 `/mnt/system/system/lib64/bootstrap` 里找的，
-   所以两条都取得到；要是只查 `lib64`，`libdl_android.so` 会漏，
-   keymint 照样起不来。这个目录布局现在有实物依据了。
+   第二行**在真机上核对过**：`adb shell ls -l /system/lib64/libdl_android.so` 给出那条链接。
+   早先只看镜像时把它记成"只在 bootstrap"是错的——`[ -e 路径 ]` 会跟随符号链接，
+   而镜像里 APEX 没挂载，链接是悬空的，于是被判成不存在。
+
+   `provide_system_libraries()`（`crates/skyward/src/secure.rs`）逐个库依次在
+   `/mnt/system/system/lib64` 与 `/mnt/system/system/lib64/bootstrap` 里找，用的是
+   `is_file()`：APEX 挂着时取 `lib64` 那份，没挂时链接悬空、自动落到 `bootstrap` 那份。
+   两条路都取得到，这正是**按顺序查两个目录**而不是各取一次的原因。
 
 9. **keymint 的依赖闭包已经逐个查过，缺的正好就是那两个库。** 对着真实的三棵树
    （recovery ramdisk 的 `/system/lib64` 72 个库、`/vendor/lib64`、已安装系统的
@@ -155,7 +158,7 @@
      android.hardware.security.keymint-service-qti (vendor)
        └── libhardware.so (vendor)
              └── libvndksupport.so   ← vendor 没有，ramdisk 没有，只在已安装系统
-                   └── libdl_android.so ← 只在已安装系统的 system/lib64/bootstrap
+                   └── libdl_android.so ← system/lib64 是链接进 runtime APEX；真副本在 bootstrap/
      ```
 
    这就是 `provide_system_libraries()` 只补这两个库的理由：其余依赖本就在手边，

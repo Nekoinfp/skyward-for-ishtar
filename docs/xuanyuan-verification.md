@@ -64,7 +64,7 @@
 | `system_dlkm` | 15,282,176 | 有内容的是 `flatten/lib/modules`（96 个模块 + `modules.dep`），`lib/modules` 本身是空的 |
 | `vendor` | 742,723,584 | `/vendor/etc/fstab.qcom` 的 `/data` 行含 `metadata_encryption=aes-256-xts:wrappedkey_v0`；配置启动的 9 个程序全在；`libhardware.so`、`lib64/hw` 在；`libvndksupport.so` **不在** |
 | `odm` | 4,563,202,048 | weaver 服务在；`ese_weaver_thales.so`、`mi_weaver.so` 在 `/odm/lib64`；`libjc_keymint*.so` 属于 StrongBox 那个 keymint，不是本配置启动的 |
-| `system` | 977,719,296 | 925 个库（recovery 只有 72）；`libvndksupport.so` 在 `system/lib64`，`libdl_android.so` **只在** `system/lib64/bootstrap`；`system/bin/snapuserd` 与 `libsnapshot.so` 都在 |
+| `system` | 977,719,296 | 925 个库（recovery 只有 72）；`libvndksupport.so` 在 `system/lib64`，`libdl_android.so` 在 `system/lib64` 是链接进 runtime APEX、真副本在 `bootstrap/`；`system/bin/snapuserd` 与 `libsnapshot.so` 都在 |
 
 三条关键结论：
 
@@ -72,7 +72,7 @@
    锁屏保护走 weaver。所以"密钥服务起不来 → /data 打不开"的因果成立。
 2. **缺的库只有两个，位置还不同目录**：
    `keymint → libhardware.so(vendor) → libvndksupport.so(仅 system) →
-   libdl_android.so(仅 system/bootstrap)`。`provide_system_libraries()` 逐个库搜索
+   libdl_android.so(system/bootstrap)`。`provide_system_libraries()` 逐个库搜索
    `lib64` 与 `lib64/bootstrap`，两条都取得到；只查 `lib64` 会漏第二个。
 3. **整张 fstab 解析无误**：62 行非注释条目 → 62 条解析结果，`/data` 两行
    （f2fs 与 mifs）字段全对。真机那两行已作为回归用例。
@@ -110,6 +110,48 @@ every path the configuration names is in the firmware ok
 `paths` 只核 `/vendor` 与 `/odm`：`/system` 下的路径是打包时塞进 ramdisk 的
 （`se_omapi`、recovery 自己的 `lib64`），不在手机的这两个分区里，命令会把它们单列出来。
 某个分区没给全时命令**直接失败**并说明该加哪个 `--`，不让"只查了一半"冒充通过。
+
+### 真机实测（2026-11-19，首次）
+
+一台已解锁**未**成功的小米 15 Ultra 经 USB 调试连上电脑，只读地取了以下数据。
+
+**设备身份与状态**
+
+| 项 | 值 |
+| --- | --- |
+| 机型 | `xuanyuan` / 25019PNF3C |
+| 系统 | `OS4.0.4.0.XOACNXM`（与配置里的底包一致） |
+| Android | **17（SDK 37）**；`ro.vendor.build.version.sdk` = **35** |
+| 安全补丁 | `2026-10-01`（与从底包提取的值一致） |
+| 当前槽 | `_a` |
+| bootloader | **已锁**：`verifiedbootstate=green`、`device_state=locked`、`devicelock=1` |
+| OEM 解锁开关 | **`oem_unlock_allowed=0`（关闭）** |
+| 区域 | CN |
+
+**与固件核对一致的项**
+
+| 项 | 结果 |
+| --- | --- |
+| `/vendor/etc/fstab.qcom` 第 88 行 | 与我从底包提取的**逐字节相同**：`metadata_encryption=aes-256-xts:wrappedkey_v0`、`fileencryption=…wrappedkey_v0`、`keydirectory=/metadata/vold/metadata_encryption` |
+| `/odm/etc/fstab.qcom` | 这台**没有**（代码按 NotFound 跳过） |
+| `libvndksupport.so` | 51,504 字节，真机与镜像**同大小** |
+| `/dev/dm-user/` | 存在（当前为空） |
+
+**新得到、且改变判断的三条**
+
+1. **`ro.virtual_ab.userspace.snapshots.enabled = true`**，`compression.enabled = true`。
+   也就是说**压缩快照（VABC）是这台机器正常的 OTA 通道**。于是"未合并的压缩快照会让
+   `mount_partitions()` 整体失败、`/data` 解不开"不是假设，是**真实可达的状态**。
+2. **版本落差是真的**：系统 SDK 37 / Android 17，而 vendor 是 SDK 35、bootloader 的
+   `swinfo.fingerprint` 写着 `xuanyuan:15/…`。这验证了打包器剔掉版本属性、
+   由 recovery 从已安装系统 adopt 的必要性——差的是**两个大版本**，不是小补丁。
+3. **一处纠错**：`/system/lib64/libdl_android.so` 在真机上是**指向 runtime APEX 的符号链接**，
+   真实副本在 `bootstrap/`。我先前只看镜像时记成"只在 bootstrap"，是 `[ -e ]` 跟随悬空
+   链接导致的误判。见第三节的更正。
+
+**结论：这台机器无法刷机。** bootloader 已锁且 OEM 解锁开关关闭，
+`fastboot flash` 会被拒绝，所以 `skyward check` 跑不起来，`/data` 解密这一项
+**仍然没有真机证据**。
 
 ---
 
