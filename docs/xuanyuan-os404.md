@@ -141,6 +141,26 @@
    所以两条都取得到；要是只查 `lib64`，`libdl_android.so` 会漏，
    keymint 照样起不来。这个目录布局现在有实物依据了。
 
+9. **keymint 的依赖闭包已经逐个查过，缺的正好就是那两个库。** 对着真实的三棵树
+   （recovery ramdisk 的 `/system/lib64` 72 个库、`/vendor/lib64`、已安装系统的
+   `system/lib64`）逐条核对 keymint 服务的每个 `NEEDED`：
+
+   - 直接依赖全部落在 **ramdisk 或 vendor**：`liblog`/`libcutils`/`libbase`/`libutils`/
+     `libbinder_ndk`/`libhidlbase`/`libcrypto`/`libc++`/`libc`/`libm`/`libdl` 在 ramdisk；
+     `libhardware`、`libqtikeymint`、`android.hardware.keymaster@4.0`、
+     `android.hardware.security.keymint-V3-ndk` 等**只在 vendor**（配置给了 `/vendor/lib64`）；
+   - 断链在**传递依赖**：
+
+     ```
+     android.hardware.security.keymint-service-qti (vendor)
+       └── libhardware.so (vendor)
+             └── libvndksupport.so   ← vendor 没有，ramdisk 没有，只在已安装系统
+                   └── libdl_android.so ← 只在已安装系统的 system/lib64/bootstrap
+     ```
+
+   这就是 `provide_system_libraries()` 只补这两个库的理由：其余依赖本就在手边，
+   补多了反而会掩盖真正缺的那一环。
+
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
 `crates/skyward-lp`：
