@@ -309,6 +309,46 @@ mod tests {
     }
 
     #[test]
+    fn chunks_longer_than_one_buffer_are_written_whole() {
+        // Every chunk here is longer than the four-megabyte buffer the reader
+        // hands over, so each is split across several of them; the hole ends
+        // on none of the buffer's edges either.
+        const BLOCK: u32 = 4096;
+        let blocks = |bytes: usize| (bytes / BLOCK as usize) as u32;
+        let raw: Vec<u8> = (0..9 << 20).map(|i| (i % 251) as u8).collect();
+        let fill = [0x11u8, 0x22, 0x33, 0x44];
+        let filled: Vec<u8> = (0..9 << 20).map(|i| fill[i % 4]).collect();
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&raw);
+        write_zeroes(&mut hasher, 5 << 20);
+        hasher.update(&filled);
+        let crc = hasher.finalize();
+
+        let bytes = image(
+            BLOCK,
+            &[
+                (RAW, blocks(raw.len()), &raw),
+                (DONT_CARE, blocks(5 << 20), &[]),
+                (FILL, blocks(filled.len()), &fill),
+            ],
+            Some(crc),
+        );
+        let expanded = raw.len() + (5 << 20) + filled.len();
+        let mut input = Cursor::new(bytes.clone());
+        assert_eq!(plan(&mut input, bytes.len() as u64).unwrap().len, expanded as u64);
+
+        let mut out = Cursor::new(vec![0xa5u8; expanded]);
+        flash(&mut input, bytes.len() as u64, &mut out, &mut |_, _| {}).unwrap();
+        let written = out.get_ref();
+        assert!(written[..raw.len()] == raw[..], "the raw chunk, split over three buffers");
+        assert!(
+            written[raw.len()..raw.len() + (5 << 20)].iter().all(|b| *b == 0xa5),
+            "the hole is left as the device held it"
+        );
+        assert!(written[raw.len() + (5 << 20)..] == filled[..], "the fill, split over three buffers");
+    }
+
+    #[test]
     fn pipelined_chunks_preserve_holes_and_check_crc() {
         let block = 4096;
         let raw: Vec<u8> = (0..block as usize * 2).map(|i| (i % 251) as u8).collect();

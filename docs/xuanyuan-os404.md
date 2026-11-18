@@ -147,7 +147,7 @@ issue #55 的故障形态，为一个没人需要的节点加这个风险不划�
 | 范围 | 命令 | 结果 |
 | --- | --- | --- |
 | LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 21 项通过（原有 7 项、扩容与双槽规划 14 项） |
-| sparse 解析与写入 | 独立 harness | 7 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充、chunk 数上界） |
+| sparse 解析与写入 | 独立 harness | 8 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充、chunk 数上界、跨缓冲的大 chunk） |
 | Android 全工作区 | `cargo ndk -t arm64-v8a --platform 30 check --workspace --all-targets` | 通过 |
 | Android 全工作区 lint | `cargo ndk -t arm64-v8a --platform 30 clippy --workspace --all-targets -- -D warnings` | 通过，零告警 |
 

@@ -139,6 +139,23 @@ pub struct Build {
     pub security_patch: String,
 }
 
+/// The phones a zip with an install script says it is for, where `device` is
+/// not one of them.
+///
+/// Such a zip carries its own updater, which writes the partitions itself, so
+/// which phone it was made for matters at least as much as for an update
+/// package. A zip that says nothing about it, or names this phone among
+/// others, gives none: an install script need not carry the metadata at all.
+pub fn declares_other_device<R: Read + Seek>(file: R, device: &str) -> Result<Option<String>> {
+    let Ok(mut zip) = ZipArchive::new(file) else { return Ok(None) };
+    if zip.index_for_name(METADATA).is_none() {
+        return Ok(None);
+    }
+    let metadata = Metadata::parse(&text(&mut zip, METADATA)?);
+    let Some(devices) = metadata.get("pre-device") else { return Ok(None) };
+    Ok((!listed(device, devices)).then(|| devices.to_string()))
+}
+
 /// Whether `update` may go on `phone`.
 pub fn check(update: &Update, phone: &Phone) -> Result<(), Refusal> {
     let m = &update.metadata;
@@ -226,6 +243,39 @@ METADATA_SIZE=1024
             w.write_all(data).unwrap();
         }
         w.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn a_zip_that_names_other_phones_is_told_apart_from_one_that_fits() {
+        let with = |pre: Option<&str>| {
+            let text = pre.map(|p| format!("ota-type=BLOCK\npre-device={p}\n"));
+            let mut entries: Vec<(&str, &[u8], CompressionMethod)> = vec![(UPDATE_BINARY, b"#!/sbin/sh\n", CompressionMethod::Stored)];
+            if let Some(text) = &text {
+                entries.push((METADATA, text.as_bytes(), CompressionMethod::Stored));
+            }
+            zip_with(&entries)
+        };
+        let other = with(Some("nezha"));
+        assert_eq!(
+            declares_other_device(Cursor::new(other), "xuanyuan").unwrap(),
+            Some("nezha".to_string()),
+            "a zip for another phone says so"
+        );
+        let ours = with(Some("nezha|xuanyuan"));
+        assert_eq!(declares_other_device(Cursor::new(ours), "xuanyuan").unwrap(), None);
+        let silent = with(None);
+        assert_eq!(
+            declares_other_device(Cursor::new(silent), "xuanyuan").unwrap(),
+            None,
+            "a zip that names no phone is run as before"
+        );
+        let unknown = with(Some("nezha"));
+        assert_eq!(
+            declares_other_device(Cursor::new(unknown), "").unwrap(),
+            Some("nezha".to_string()),
+            "a phone named nothing is none of the names"
+        );
+        assert_eq!(declares_other_device(Cursor::new(b"not a zip".to_vec()), "xuanyuan").unwrap(), None);
     }
 
     #[test]

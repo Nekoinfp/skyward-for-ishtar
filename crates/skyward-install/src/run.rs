@@ -1093,6 +1093,18 @@ fn run_script<S>(ctx: &mut Context, mount: &Mount<S>, size: u64) -> Result<Done>
     if let Some(refusal) = short_of_charge(ctx.origin)? {
         return Ok(Done::Decided(Outcome::Refused(refusal)));
     }
+    // A zip's own updater writes this phone's partitions, so one made for
+    // another phone is refused before anyone is asked to agree to it, as
+    // Android's own recovery refuses it. Where this phone cannot say what it
+    // is, the zip is run as before rather than refused over a missing
+    // property, and a zip that names no phone is run as before too.
+    if let Some(device) = prop("ro.product.device") {
+        let file = File::open(mount.path()).context("open the package")?;
+        if let Some(others) = crate::package::declares_other_device(BufReader::new(file), &device)? {
+            let _ = kmsg(&format!("install: the zip names {others}; this phone is {device}"));
+            return Ok(Done::Decided(Outcome::Refused(Refusal::OtherDevice(others))));
+        }
+    }
     if ctx.options.signed {
         match verify_signature(ctx, mount, size)? {
             Verdict::Signed => {}
