@@ -46,6 +46,33 @@
 `provide_system_libraries()` 从已安装系统补 `libvndksupport.so` 与 `libdl_android.so`，
 并给服务补 `/vendor/lib64/hw` 等库路径。本分支沿用该做法，没有扩大范围。
 
+### 已经核对过的证据
+
+这几条是拆开真实镜像查的，不是推测：
+
+1. **底包 recovery 确实缺那几个库。** 4.0.4.0 底包 ramdisk 里有 72 个
+   `system/lib64/*.so`，但 `libvndksupport.so`、`libdl_android.so`、`libhardware.so`、
+   `libqtigatekeeper.so`、`libEseUtils.so` **一个都没有**。issue #64 的机制成立。
+   `provide_system_libraries()` 补的正是前两个；`libhardware.so` 在 `/vendor/lib64`、
+   后两个在 `/vendor/lib64/hw`，都由服务的库路径覆盖。
+
+2. **AVB footer 缺 `security_patch` 不是 4.0.4 的退化。** 我把 4.0.0.18 和 4.0.4.0
+   两个底包的 recovery 分区都取出来（各自哈希都与发布配置一致），解析各自的 vbmeta：
+   **两者都只有 `com.android.build.recovery.fingerprint`**，都没有 `security_patch`、
+   也没有 `os_version`；而出货的 v1.0.0 镜像 footer 里一个属性都没有。
+   所以打包时那条 `names no security patch in its footer` 警告是这个机型的常态，
+   不必再往这个方向查。
+
+3. **底包 recovery 的版本属性是过时的，必须由运行时覆盖。** 4.0.4.0 底包的
+   `prop.default` 写的是 `ro.build.version.sdk=35`、`release=15`
+   （即 Android 15 的数），而系统本身比这新。打包器把
+   `ro.build.version.release` / `release_or_codename` / `security_patch` /
+   `ro.vendor.build.security_patch` 四个属性从 `prop.default` 里删掉，
+   由 `adopt_installed_version` 在启动时用**已安装系统** build.prop 的值写入，
+   再由 `environment::pin()` 重启 keymint 让它重新读取。
+   两个底包在这四个属性上的差别也确认了：4.0.0.18 是 `2026-09-01`，4.0.4.0 是
+   `2026-10-01`。
+
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
 `crates/skyward-lp`：
