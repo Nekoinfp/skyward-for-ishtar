@@ -184,7 +184,7 @@ issue #55 的故障形态，为一个没人需要的节点加这个风险不划�
 | 两个静态首程序 | 同上加 `RUSTFLAGS=-C target-feature=+crt-static` | 退出码 0 |
 | 打包器 | `cargo build --locked --release -p skyward-pack` | 退出码 0 |
 | LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 23 项通过（原有 7 项、扩容与双槽规划 16 项） |
-| sparse 解析与写入 | `cargo test -p skyward-install sparse` | 9 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充、chunk 数上界、跨缓冲的大 chunk、12 轮确定性随机构造） |
+| sparse 解析与写入 | `cargo test -p skyward-install sparse` | 10 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充、chunk 数上界、跨缓冲的大 chunk、12 轮确定性随机构造） |
 | Android 全工作区编译 | `cargo ndk -t arm64-v8a --platform 30 check/clippy --workspace --all-targets` | 通过，零告警 |
 
 前三项是在 Linux（WSL 里的 Ubuntu 24.04，rustc 1.100.0）上跑的；为此在本机手工导入了
@@ -213,12 +213,12 @@ Windows 主机上跑不了整个 workspace：`skyward-bootimg` 的 ramdisk 解�
 ```
 skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img
 104,857,600 字节
-SHA-256 30fbe2a4acb05dea68f68ed9b1726e88fa4ed1d2786f18dcc04fec8c502fec27
+SHA-256 7ab6af11d9f480e2bbc6c71d8e597e6e1dc54032856d2545eef1cd4ea91a4614
 ```
 
 打包器自己从 4.0.4.0 更新包里取出 recovery 分区并核对了哈希。镜像内容逐项核对过：
 形状与底包一致（`ANDROID!`、header_version 4、kernel 0、同尺寸）、
-`system/bin/recovery` 是 Skyward 本体（8,994,312 字节）、`system/bin/skyward` 与五个
+`system/bin/recovery` 是 Skyward 本体（8,994,568 字节）、`system/bin/skyward` 与五个
 脚本命令链接都在、`skyward/device.toml` 与仓库里的逐字节相同、OMAPI 的二进制与
 VINTF 清单齐全、`prop.default` 末尾是 `ro.secure=0` / `ro.debuggable=1` 且已移除构建
 版本属性。**它没有在任何手机上运行过。**
