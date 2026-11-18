@@ -708,6 +708,66 @@ mod tests {
         }
     }
 
+    /// A sparse image of `data`, one raw chunk, as `img2simg` lays one.
+    fn sparse_of(data: &[u8]) -> Vec<u8> {
+        let block = 4096u32;
+        let blocks = (data.len() / block as usize) as u32;
+        let mut out = Vec::new();
+        out.extend([0x3a, 0xff, 0x26, 0xed]);
+        for n in [1u16, 0, 28, 12] {
+            out.extend(n.to_le_bytes());
+        }
+        for n in [block, blocks, 1u32, 0] {
+            out.extend(n.to_le_bytes());
+        }
+        out.extend(0xcac1u16.to_le_bytes());
+        out.extend(0u16.to_le_bytes());
+        out.extend(blocks.to_le_bytes());
+        out.extend((12 + data.len() as u32).to_le_bytes());
+        out.extend(data);
+        out
+    }
+
+    #[test]
+    fn a_sparse_filesystem_image_goes_into_logical_partitions_of_any_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let small = partition(dir.path(), "system_a", 1 << 20);
+        let big = partition(dir.path(), "system_b", 2 << 20);
+        let data: Vec<u8> = (0..12 * 1024).map(|i| (i % 251) as u8).collect();
+        flash_into_logical(&sparse_of(&data), &[small.clone(), big.clone()]).unwrap();
+        for path in [&small, &big] {
+            let got = std::fs::read(path).unwrap();
+            assert_eq!(&got[..data.len()], &data[..], "{} holds the expansion", path.display());
+            assert!(got[data.len()..].iter().all(|&b| b == 0xaa), "and nothing past it, {}", path.display());
+        }
+    }
+
+    #[test]
+    fn a_sparse_image_that_does_not_fit_is_refused_before_anything_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let small = partition(dir.path(), "system_a", 8 << 10);
+        let data = vec![0x11u8; 12 * 1024];
+        let err = flash_into_logical(&sparse_of(&data), &[small.clone()]).unwrap_err();
+        assert!(err.to_string().contains("expands to"), "{err}");
+        assert!(std::fs::read(&small).unwrap().iter().all(|&b| b == 0xaa), "the partition is as it was");
+    }
+
+    #[test]
+    fn a_logical_image_that_ends_like_a_signed_one_keeps_its_end_where_it_is() {
+        // A filesystem's last bytes are nobody's footer: moving them to the
+        // partition's end, as a signed partition image's footer is moved,
+        // would corrupt it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = partition(dir.path(), "system_a", 3 << 20);
+        let mut image = vec![0x77u8; 4096 - 64];
+        image.extend_from_slice(b"AVBf");
+        image.resize(4096, 0);
+        flash_into_logical(&image, &[path.clone()]).unwrap();
+        let got = std::fs::read(&path).unwrap();
+        assert_eq!(&got[..4096], &image[..], "the image is where it was written");
+        assert!(got[4096..].iter().all(|&b| b == 0xaa), "and its end was not moved to the partition's");
+    }
+
     #[test]
     fn a_partition_written_into_both_slots_is_the_same_size_in_them() {
         let dir = tempfile::tempdir().unwrap();

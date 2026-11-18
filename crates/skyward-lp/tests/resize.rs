@@ -516,6 +516,19 @@ fn rejects_overlap_and_bad_alignment() {
 }
 
 #[test]
+fn a_metadata_slot_the_geometry_does_not_have_is_refused_before_the_disk_is_touched() {
+    let md = metadata();
+    let path = scratch("no-such-slot");
+    let before = vec![0x33; 64 * 1024];
+    std::fs::write(&path, &before).unwrap();
+    // The geometry names two slots; a third is nowhere to write.
+    let error = commit(&path, 2, &md).unwrap_err().to_string();
+    assert!(error.contains("does not exist"), "{error}");
+    assert_eq!(std::fs::read(&path).unwrap(), before, "the disk was not touched");
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn commits_primary_and_backup_and_preserves_other_slots() {
     let md = metadata();
     let grown = grow(&md, "system", 24 * SECTOR_SIZE).unwrap();

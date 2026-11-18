@@ -183,7 +183,7 @@ issue #55 的故障形态，为一个没人需要的节点加这个风险不划�
 | Android 服务构建 | `cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward` | 退出码 0 |
 | 两个静态首程序 | 同上加 `RUSTFLAGS=-C target-feature=+crt-static` | 退出码 0 |
 | 打包器 | `cargo build --locked --release -p skyward-pack` | 退出码 0 |
-| LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 22 项通过（原有 7 项、扩容与双槽规划 15 项） |
+| LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 23 项通过（原有 7 项、扩容与双槽规划 16 项） |
 | sparse 解析与写入 | `cargo test -p skyward-install sparse` | 9 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充、chunk 数上界、跨缓冲的大 chunk、12 轮确定性随机构造） |
 | Android 全工作区编译 | `cargo ndk -t arm64-v8a --platform 30 check/clippy --workspace --all-targets` | 通过，零告警 |
 
