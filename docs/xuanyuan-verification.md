@@ -43,7 +43,7 @@
 | `cargo build --locked --release -p skyward-pack` | 退出码 0 |
 
 其中与本适配直接相关的用例数：`skyward-install` 169、`skyward-lp` 23、
-`skyward-block` 37、`skyward-pack` 13、`skyward` 二进制自己 16（报告 9、硬件描述改写 4、库拷贝 3），`skyward-sys` 47（含描述符移交与"进程还在跑吗"）。
+`skyward-block` 37、`skyward-pack` 13、`skyward` 二进制自己 22（报告 9、硬件描述改写 4、库拷贝 3、目录搜索 6），`skyward-sys` 47（含描述符移交与"进程还在跑吗"）。
 
 稳定性：整个 workspace 连跑 15 次无失败；修掉一处偶发（并行测试把彼此的 `flock`
 当成对手）后，avbctl 连跑 60 次无失败。
