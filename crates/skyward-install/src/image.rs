@@ -774,6 +774,20 @@ mod tests {
     }
 
     #[test]
+    fn the_count_of_a_plain_image_ends_at_what_both_slots_and_their_read_back_take() {
+        let dir = tempfile::tempdir().unwrap();
+        let slots = [partition(dir.path(), "boot_a", 3 << 20), partition(dir.path(), "boot_b", 3 << 20)];
+        let image = vec![0x44u8; 1 << 20];
+        let mut seen: Vec<(u64, u64)> = Vec::new();
+        flash(&mut Cursor::new(&image), image.len() as u64, &slots, &mut |done, of| seen.push((done, of))).unwrap();
+        let last = seen.last().copied().expect("the count was reported");
+        assert_eq!(last.0, last.1, "it ends where it said it would");
+        assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0 && w[0].1 == w[1].1), "forward, against one total: {seen:?}");
+        let image_len = image.len() as u64;
+        assert_eq!(last.1, image_len * 4, "written and read back, in both slots");
+    }
+
+    #[test]
     fn a_sparse_image_written_into_both_slots_counts_to_the_end_of_the_second() {
         let dir = tempfile::tempdir().unwrap();
         let slots = [partition(dir.path(), "system_a", 1 << 20), partition(dir.path(), "system_b", 1 << 20)];

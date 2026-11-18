@@ -449,6 +449,55 @@ mod tests {
         assert_eq!(seen.last().copied(), Some((expanded, expanded)), "and ends at the end, not at the bytes written");
     }
 
+    /// A device that takes `limit` bytes and refuses the rest, as a partition
+    /// that is smaller than the image or a flash that has gone away.
+    struct Refuses {
+        held: u64,
+        limit: u64,
+    }
+
+    impl Write for Refuses {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            if self.held + data.len() as u64 > self.limit {
+                return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "the device is full"));
+            }
+            self.held += data.len() as u64;
+            Ok(data.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Seek for Refuses {
+        fn seek(&mut self, from: SeekFrom) -> std::io::Result<u64> {
+            self.held = match from {
+                SeekFrom::Start(n) => n,
+                SeekFrom::Current(n) => self.held.checked_add_signed(n).ok_or_else(|| std::io::Error::other("seek before the start"))?,
+                SeekFrom::End(_) => return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "a device has no end to seek from")),
+            };
+            Ok(self.held)
+        }
+    }
+
+    #[test]
+    fn a_device_that_stops_taking_bytes_fails_the_write_rather_than_hanging() {
+        // Nine megabytes of one chunk, so it goes out in three buffers; the
+        // device takes the first and refuses the second.
+        let block = 4096u32;
+        let blocks = (9 << 20) / block;
+        let payload = vec![0x5au8; blocks as usize * block as usize];
+        let bytes = image(block, &[(RAW, blocks, &payload)], None);
+        let mut device = Refuses {
+            held: 0,
+            limit: BUFFER as u64 + BUFFER as u64 / 2,
+        };
+        let error = flash(&mut Cursor::new(&bytes), bytes.len() as u64, &mut device, &mut |_, _| {}).unwrap_err();
+        assert!(error.to_string().contains("write sparse output"), "{error:#}");
+        assert_eq!(device.held, BUFFER as u64, "the buffer it did take was written, and no more");
+    }
+
     #[test]
     fn chunks_longer_than_one_buffer_are_written_whole() {
         // Every chunk here is longer than the four-megabyte buffer the reader
