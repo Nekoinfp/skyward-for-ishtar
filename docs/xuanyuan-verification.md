@@ -16,7 +16,7 @@
 | --- | --- |
 | 镜像 | `skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img` |
 | 大小 | 104,857,600 字节（与底包 recovery 分区同尺寸） |
-| SHA-256 | `0ea17d300e4259408dacf8373cc57380aac6369ae8dfcdf4ec709bd7e1f3d3ea` |
+| SHA-256 | `f2a160704717b317e1532f16c288ad50ee33d33b6057a4e2fd10ecb35e084a84` |
 | 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,256,277 字节 |
 | 内含 recovery 本体 | 8994312 字节，AArch64 ELF |
 | 底包 | OS4.0.4.0.XOACNXM，recovery 分区 SHA-256 `55f491052a360bc15362fd80c8bd2dd0912b289e1653f2bd7f9c5a12e7fea27b`（打包器自行核对） |
@@ -149,9 +149,56 @@ every path the configuration names is in the firmware ok
    真实副本在 `bootstrap/`。我先前只看镜像时记成"只在 bootstrap"，是 `[ -e ]` 跟随悬空
    链接导致的误判。见第三节的更正。
 
-**结论：这台机器无法刷机。** bootloader 已锁且 OEM 解锁开关关闭，
-`fastboot flash` 会被拒绝，所以 `skyward check` 跑不起来，`/data` 解密这一项
-**仍然没有真机证据**。
+**结论：这台机器刷了，而且 `/data` 解开了。** 起先 `ro.boot.verifiedbootstate=green`、
+`ro.boot.flash.locked=1`、`oem_unlock_allowed=0` 读起来像未解锁，实际是装在机上的
+Magisk 模块（`tricky_store` 等）把状态伪装了。`fastboot getvar unlocked` 给出
+**`unlocked: yes`**——fastboot 直连 bootloader，模块改不了这个值。
+
+**刷入与结果（2026-11-19）**
+
+```
+fastboot flash recovery_a skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img   OKAY
+fastboot flash recovery_b skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img   OKAY
+fastboot reboot recovery
+```
+
+第一次启动后 `skyward check` 报出**六个密钥服务全部 NOT registered**。查 dmesg 拿到根因：
+
+```
+servicemanager: getRecoveryHalManifest: VINTF parse error: Cannot add manifest fragment
+/system/etc/vintf/manifest/weaver-thales.xml: HAL "android.hardware.weaver" has a conflict:
+Conflicting FqInstance: IWeaver/default (@2) (from android.hardware.weaver-service.thales.xml)
+vs. IWeaver/default (@1) (from weaver-thales.xml).
+```
+
+两份描述声明了同一个实例：ramdisk 里打包器放的 `weaver-thales.xml`（@1）与已安装系统提供的
+`android.hardware.weaver-service.thales.xml`（@2）。**读者遇到冲突会丢掉整份清单**，
+于是一个服务都找不到——gatekeeper 报 "Could not find … in the VINTF manifest"，
+secure_element 连懒启动都失败。
+
+修法是让**已安装系统的描述优先**：写入系统的描述时，删掉同目录下声明了同一实例的旧描述。
+修好后重新刷入，`skyward check` 变成：
+
+```
+the services the key chain needs
+  registered: android.hardware.security.keymint.IKeyMintDevice/default
+  registered: android.hardware.gatekeeper.IGatekeeper/default
+  registered: android.hardware.secure_element.ISecureElement/eSE1
+  registered: android.se.omapi.ISecureElementService/default
+  registered: android.hardware.weaver.IWeaver/default
+  registered: android.hardware.boot.IBootControl/default
+```
+
+**`/data` 解开了：**
+
+```
+/dev/block/dm-9 on /data type f2fs (rw,...,inlinecrypt,...)
+477G  366G 已用  111G 可用        /data
+```
+
+`/data/media/0`、`/data/system/users/0` 都是真实的用户数据内容。
+
+这一条是本适配从第一天起要解决的事，现在**在真机上成立**。
 
 ---
 
@@ -174,10 +221,11 @@ every path the configuration names is in the firmware ok
 
 | 项 | 为什么 |
 | --- | --- |
-| `/data` 在真机上能否解密 | 需要设备 |
-| OTA 安装、切槽、开机 | 需要设备 |
+| ~~`/data` 在真机上能否解密~~ | **已验证（2026-11-19）**：六个密钥服务注册、`/data` 以 `dm-9` 挂上、477G/366G 真实数据可读 |
+| OTA 安装、切槽、开机 | 需要设备，且要冒失败风险 |
 | 逻辑分区扩容后能否挂载 | 需要设备（`super` 元数据改动不可逆，先备份） |
 | sparse super 实际写盘 | 需要设备 |
+| 界面与触摸、WLAN、振动、亮度 | 需要人看着屏幕 |
 | 压缩快照/增量 OTA | 未实现。**但不是手机不支持**：内核已编入 `dm-user`，系统的 `snapuserd` 是静态二进制，两者都在。缺的是 recovery 侧的控制逻辑；**协议已查清并与本机 daemon 核对过**（12/13 控制消息匹配），详见 `docs/vabc-design.md` |
 | 非 A/B 更新包 | 未实现：xuanyuan 是 A/B 机型，此类包用不上；只加了"包声明了别的机型就拒绝"的安全门 |
 
