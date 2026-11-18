@@ -522,26 +522,29 @@ fn report(g: &Gathered) -> String {
             if entry.extra("metadata_encryption").is_none() {
                 out.push_str("    note: no metadata_encryption, so this table says the partition is not encrypted whole\n");
             }
-            match (&g.key_dir, &g.key_files, &g.key_error) {
-                (Some(dir), Some(files), _) => {
-                    let mut named: Vec<String> = files.iter().map(|(name, len)| format!("{name} ({len} bytes)")).collect();
-                    named.sort();
-                    let said = if named.is_empty() { "empty".to_string() } else { named.join(", ") };
-                    out.push_str(&format!("  the key it keeps: {dir}: {said}\n"));
-                }
-                (Some(dir), None, Some(error)) => out.push_str(&format!("  the key it keeps: {dir} ({error})\n")),
-                (_, _, Some(error)) => out.push_str(&format!("  the key it keeps: ({error})\n")),
-                _ => out.push_str("  the key it keeps: (not looked at)\n"),
-            }
-            match (&g.read_through, &g.device_error) {
-                (Some(device), _) => out.push_str(&format!("  /data is read through: {device}\n")),
-                (None, Some(error)) => out.push_str(&format!("  /data is read through: ({error})\n")),
-                _ => {}
-            }
         }
         (None, true, _) => out.push_str("  it says nothing about /data\n"),
         (None, false, Some(error)) => out.push_str(&format!("  it could not be read: {error}\n")),
         (None, false, None) => out.push_str("  (the table was not read)\n"),
+    }
+    // Where the key is kept and what the partition would be read through are
+    // both read off that entry, so both are said whatever became of it: a line
+    // that says a look was not made is what this report is for.
+    match (&g.key_dir, &g.key_files, &g.key_error) {
+        (Some(dir), Some(files), _) => {
+            let mut named: Vec<String> = files.iter().map(|(name, len)| format!("{name} ({len} bytes)")).collect();
+            named.sort();
+            let said = if named.is_empty() { "empty".to_string() } else { named.join(", ") };
+            out.push_str(&format!("  the key it keeps: {dir}: {said}\n"));
+        }
+        (Some(dir), None, Some(error)) => out.push_str(&format!("  the key it keeps: {dir} ({error})\n")),
+        (_, _, Some(error)) => out.push_str(&format!("  the key it keeps: ({error})\n")),
+        _ => out.push_str("  the key it keeps: (not looked at, the table names none)\n"),
+    }
+    match (&g.read_through, &g.device_error) {
+        (Some(device), _) => out.push_str(&format!("  /data is read through: {device}\n")),
+        (None, Some(error)) => out.push_str(&format!("  /data is read through: ({error})\n")),
+        _ => out.push_str("  /data is read through: (not looked at, the table names none)\n"),
     }
 
     out.push_str("\nthe services the key chain needs\n");
