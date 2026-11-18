@@ -187,9 +187,18 @@ Unix 专有接口，这与本次改动无关。CI 的 `ubuntu-24.04` 上会跑�
    `dm-snapshot` 快照**，这条路径 Skyward 本来就能映射与合并，压缩快照这一缺口不影响它。
 
 2. **非 A/B 机型的更新包**
-   `xuanyuan` 是 A/B + 动态分区机型，这条对本案没有实际影响。
-   唯一相关的安全口子是要保证 A/B 机型上不会误跑 BLOCK 包，现有 `package::check`
-   的 `NotAb` 拒绝保持不变。
+   `xuanyuan` 是 A/B + 动态分区机型，运行别人的非 A/B 包没有意义，所以这里不做
+   "让非 A/B 包在本机跑通"。真正相关的是**别让不该跑的包跑起来**，本分支补了一半：
+
+   - BLOCK/AB 类型的 `payload.bin` 包本来就有 `NotAb` 拒绝，保持不变；
+   - **带安装脚本的 zip 原先完全不看设备**：它有自己的一套 updater，直接写本机分区，
+     却没有 `pre-device` 校验。现在 `package::declares_other_device` 读它的
+     `META-INF/com/android/metadata`，只要写了 `pre-device` 且不包括本机，就在
+     用户确认之前拒绝（`Refusal::OtherDevice`）；没写、或本机连
+     `ro.product.device` 都读不出来时，行为和以前完全一样。
+
+   还没做的是：真正让一个非 A/B 包在这台 A/B 机上按它的布局跑起来（`update-binary`
+   的无后缀分区映射、`/cache/recovery` 兼容）。那对 xuanyuan 没有用途。
 
 3. **真机回归**：见下。
 
