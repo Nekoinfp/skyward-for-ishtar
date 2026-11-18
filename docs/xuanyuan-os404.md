@@ -90,6 +90,11 @@
    而 `skyward_modules::source_dir` 找的是 `/vendor_dlkm/lib/modules` 与
    `/system_dlkm/flatten/lib/modules`，两边对得上。
 
+   加载器要读的依赖表也在：`vendor_dlkm/lib/modules` 有 391 个 `.ko` 与
+   `modules.dep`/`modules.alias`/`modules.softdep`/`modules.load`；
+   `system_dlkm` 里**空的**是 `lib/modules`，有内容的是
+   `flatten/lib/modules`（96 个 `.ko` + `modules.dep`），配置选的正是后者。
+
 5. **模块或服务起不来不会让 recovery 起不来。** `prepare()` 把 super 挂载与
    `bring_up` 的失败都写进内核日志（"partitions not mounted" /
    "devices not brought up"），界面照常显示。所以这台的失败表现应该是
