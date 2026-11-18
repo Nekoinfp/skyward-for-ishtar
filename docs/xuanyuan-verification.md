@@ -126,7 +126,7 @@ cargo run --release -p skyward-pack -- paths --config devices/xuanyuan.toml \
 | OTA 安装、切槽、开机 | 需要设备 |
 | 逻辑分区扩容后能否挂载 | 需要设备（`super` 元数据改动不可逆，先备份） |
 | sparse super 实际写盘 | 需要设备 |
-| 压缩快照/增量 OTA | 未实现：recovery 侧 `update_engine_sideload` 在设计上就关闭 VABC，需要与固件匹配的 `libsnapshot`/`snapuserd.recovery` 与两阶段合并，属 AOSP 侧工作量 |
+| 压缩快照/增量 OTA | 未实现。**但不是手机不支持**：内核已编入 `dm-user`，系统的 `snapuserd` 是静态二进制，两者都在。缺的是 recovery 侧的控制逻辑，且没有真机不敢写——详见 `docs/vabc-design.md` |
 | 非 A/B 更新包 | 未实现：xuanyuan 是 A/B 机型，此类包用不上；只加了"包声明了别的机型就拒绝"的安全门 |
 
 ---

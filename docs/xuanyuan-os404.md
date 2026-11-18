@@ -382,6 +382,8 @@ VINTF 清单齐全、`prop.default` 末尾是 `ro.secure=0` / `ro.debuggable=1` 
 
 ## 六、明确没有做的部分
 
+> 压缩快照这一项另有单独一份现状与方案：`docs/vabc-design.md`（含实测到的内核与守护进程情况）。
+
 1. **recovery 内应用/合并压缩快照（VABC）**
    原厂 recovery 版 `update_engine_sideload` 在 recovery 中直接把
    `GetVirtualAbCompressionFeatureFlag()` 判为 NONE（AOSP 注释就写着
