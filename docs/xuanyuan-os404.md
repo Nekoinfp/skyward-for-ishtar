@@ -112,6 +112,21 @@
    所以 `provide_system_libraries()` 从系统分区补它是唯一的办法，这也把
    issue #64 的机制闭合了。
 
+7. **weaver 与 keymint 的库路径也是对的。** 取出 4.0.4.0 的 `odm`
+   （4,563,202,048 字节）核对：
+
+   - `/odm/bin/hw/android.hardware.weaver-service.thales` 存在；
+   - 它 `NEEDED` 里的 `ese_weaver_thales.so` 与 `mi_weaver.so` 都在
+     `/odm/lib64`，而配置正好给了 weaver 服务
+     `["/system/lib64", "/vendor/lib64", "/odm/lib64"]`；
+   - `/odm/lib64` 里那几个 `libjc_keymint*.so` 属于**另一个** keymint
+     （`/odm/bin/hw/android.hardware.security.keymint-service.strongbox-thales`），
+     不是配置启动的 TEE 版（`/vendor/bin/hw/android.hardware.security.keymint-service-qti`，
+     它链接 `/vendor/lib64/libqtikeymint.so` 且在 vendor 下的依赖齐全）。
+     所以 keymint 服务的库路径**不需要**加 `/odm/lib64`——这一点是查过才没有乱加的；
+   - `libqtigatekeeper.so` 与 `libEseUtils.so` 确实在 `/vendor/lib64/hw`，
+     而 gatekeeper 与 secure_element 两个服务的库路径里都有它。
+
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
 `crates/skyward-lp`：
