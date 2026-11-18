@@ -172,6 +172,16 @@ fastboot reboot recovery
 4. `adb shell dmesg | grep -i skyward` 里不应出现
    `devices not brought up` 或 `partitions not mounted`。
 
+**如果 `/data` 解不开，先看这两处再怀疑镜像**：
+
+- `skyward check` 里 `an update in flight:` 是不是 `Snapshotted` 而不是 `None`。
+  若手机上有**未合并的压缩快照**，`mount_partitions()` 会**整体失败**——快照无法由
+  snapuserd 服务时 `map_snapshot()` 直接报错，而这个错中止整个挂载循环，于是 `vendor`
+  没挂上、keymint 起不来、`/data` 解不开。**表现与"镜像坏了"完全一样。**
+  处理办法：正常启动一次系统让它合并，再回 recovery 试。
+- `skyward check` 里 `the services the key chain needs` 下有没有 `NOT registered`。
+  有的话，`/skyward/run/services/<名字>.log` 里就是它退出的原因（缺哪个库、哪个节点）。
+
 **要回报的东西**（一条命令打包）：
 
 ```
