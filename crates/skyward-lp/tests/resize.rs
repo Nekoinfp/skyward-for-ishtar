@@ -246,6 +246,91 @@ fn a_plan_that_would_not_fit_is_refused() {
 }
 
 #[test]
+fn growth_never_takes_a_sector_that_was_not_its_own() {
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut stream = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    for round in 0..40 {
+        let start = 128u64;
+        let length = 200 + stream() % 600;
+        let end = start + length;
+        let mut md = metadata();
+        md.damaged.clear();
+        // A group with no limit, so that only the device's own room decides.
+        md.groups[0].maximum_size = 0;
+        md.block_devices[0].alignment = 0;
+        md.block_devices[0].first_logical_sector = start;
+        md.block_devices[0].size = length * SECTOR_SIZE;
+        let at = start + 40 + stream() % (length - 80);
+        md.partitions = vec![Partition {
+            name: "system".into(),
+            attributes: 0,
+            group: 0,
+            extents: vec![Extent::Linear {
+                sectors: 8,
+                device: 0,
+                sector: at,
+            }],
+        }];
+        // What another slot of super holds, which is not this one's to take.
+        let mut taken: Vec<(usize, std::ops::Range<u64>)> = Vec::new();
+        for _ in 0..stream() % 3 {
+            let from = start + stream() % length;
+            let to = (from + 1 + stream() % 40).min(end);
+            let clear_of_ours = from >= at + 8 || to <= at;
+            if from < to && clear_of_ours {
+                taken.push((0, from..to));
+            }
+        }
+        let wanted = 8 + 1 + stream() % 60;
+        match grow_avoiding(&md, "system", wanted * SECTOR_SIZE, &taken) {
+            Ok(grown) => {
+                let partition = grown.partition("system").expect("the partition it grew");
+                assert_eq!(
+                    partition.extents[0],
+                    Extent::Linear {
+                        sectors: 8,
+                        device: 0,
+                        sector: at
+                    },
+                    "round {round}: what was there is not moved"
+                );
+                assert_eq!(partition.sectors(), wanted, "round {round}: the size it was asked for");
+                let mine: Vec<(usize, std::ops::Range<u64>)> = sectors(&grown);
+                for (index, (device, range)) in mine.iter().enumerate() {
+                    assert!(range.start >= start && range.end <= end, "round {round}: {range:?} is inside the device");
+                    for (other_device, held) in &taken {
+                        assert!(
+                            device != other_device || range.end <= held.start || held.end <= range.start,
+                            "round {round}: {range:?} is clear of what another slot holds, {held:?}"
+                        );
+                    }
+                    for (other_device, other) in &mine[..index] {
+                        assert!(
+                            device != other_device || range.end <= other.start || other.end <= range.start,
+                            "round {round}: {range:?} does not overlap {other:?}"
+                        );
+                    }
+                }
+                // What it planned has to be writable as it stands.
+                encode_metadata(&grown).unwrap_or_else(|e| panic!("round {round}: {e:#}"));
+            }
+            Err(e) => {
+                let said = format!("{e:#}");
+                assert!(
+                    said.contains("not enough") || said.contains("group"),
+                    "round {round}: refused for a reason it does not have: {said}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn fragmented_growth_uses_sorted_holes_and_other_devices() {
     let mut md = metadata();
     md.geometry.metadata_max_size = 8192;
