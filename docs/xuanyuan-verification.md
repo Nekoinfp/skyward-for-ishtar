@@ -200,6 +200,60 @@ the services the key chain needs
 
 这一条是本适配从第一天起要解决的事，现在**在真机上成立**。
 
+### 真机第二轮：只读命令与硬件
+
+修好之后又在真机上跑了几个**只读**子命令，结果都落在预期上。
+
+**`skyward lp` —— 解析器面对小米真实的 super 元数据**
+
+```
+slot 0: version 10.2, flags 0x1
+geometry: 3 metadata slots of 65536 bytes, logical block 4096 bytes
+device super: first sector 2048, 13421772800 bytes, alignment 4096 offset 0
+group qti_dynamic_partitions_a: max 13411287040 bytes
+partition odm_a … 4563202048 bytes      partition system_a … 977719296 bytes
+partition product_a … 5273763840 bytes  partition vendor_a … 742723584 bytes
+partition vendor_dlkm_a … 87343104      partition system_dlkm_a … 15282176
+partition system_ext_a … 817664000      partition mi_ext_a … 170807296
+partition mi_product_a … 348160         partition odm_a-cow group cow … 771870720
+```
+
+**每个分区大小都与我从底包里提取的镜像逐字节一致**（odm 4,563,202,048、system
+977,719,296、vendor 742,723,584、vendor_dlkm 87,343,104、system_dlkm 15,282,176）。
+`--slot 1` 同样解析正常。这是 LP 解析器第一次面对真实元数据——此前只用合成数据测过。
+
+有两点只有真机才看得到：每个分区是**多个 extent 拼接**的（odm_a 有 10 段），
+而 `odm_a-cow` 已经在 `cow` 组里、占 771,870,720 字节。
+
+**`skyward info` —— 读数与配置对得上**
+
+```
+model = Xiaomi 15 Ultra (xuanyuan)     cpu = 8 cores, max 4320000 kHz
+ram = 15467980 KiB                     panel = (1440, 3200)   ← 与配置一致
+os_version = OS4.0.4.0.XOACNXM         android = 17
+patch = 2026-10-01                     kernel = 6.6.118-android15-…
+storage = 512403419136 bytes           battery = 49%, 28.4°C, cycles 522
+boot = Boot { unlocked: Some(true), verified: Some("orange") }
+partitions = 141 under /dev/block/by-name
+```
+
+`verified: "orange"` 是**确证**：在系统里读到的 `green` 是 Magisk 模块伪装的结果。
+
+**屏幕、触摸、WLAN**
+
+| 项 | 结果 |
+| --- | --- |
+| 显示 | `skyward: the display is DSI connector 67 mode "1440x3200x120cmd" 1440x3200 120 Hz` —— Skyward 自己把屏点起来了 |
+| 背光 | `panel0-backlight/brightness = 546`（非零） |
+| 输入 | `/dev/input/event0..7` 都在，`synaptics_tcm2`、`xiaomi_touch` 已加载 |
+| eSE 模块 | `stm_nfc_i2c`、`stm_st54se_gpio` 已加载 |
+| WLAN | `wlan0`/`p2p0`/`wifi-aware0` 都在，`wpa_supplicant` 在跑（pid 798） |
+
+**WLAN 起来时内核有一条 WARNING**：`Unbalanced IRQ 375 wake disable`，
+出自 `cnss2` 的 `cnss_driver_event_work`，前面是 `msm_pcie_disable` /
+`invalid GPIO -22`。是 PCIe 复位期驱动的告警，不是 panic——网卡随后正常起来。
+记在这里，将来若真机上 WLAN 偶发不工作，先看这一条。
+
 ---
 
 ## 四、已经查过、确认没问题的地方
@@ -222,10 +276,11 @@ the services the key chain needs
 | 项 | 为什么 |
 | --- | --- |
 | ~~`/data` 在真机上能否解密~~ | **已验证（2026-11-19）**：六个密钥服务注册、`/data` 以 `dm-9` 挂上、477G/366G 真实数据可读 |
+| ~~屏幕与背光、触摸驱动、eSE 模块、WLAN~~ | **已验证（2026-11-19，只读）**：屏幕 1440x3200@120 由 Skyward 点起、背光 546、触摸与 eSE 模块加载、`wlan0` 起来且 `wpa_supplicant` 在跑。**触摸是否响应、界面能否操作仍需人看着屏幕** |
 | OTA 安装、切槽、开机 | 需要设备，且要冒失败风险 |
 | 逻辑分区扩容后能否挂载 | 需要设备（`super` 元数据改动不可逆，先备份） |
 | sparse super 实际写盘 | 需要设备 |
-| 界面与触摸、WLAN、振动、亮度 | 需要人看着屏幕 |
+| 触摸是否真的能用、界面各页是否正常 | 需要人看着屏幕 |
 | 压缩快照/增量 OTA | 未实现。**但不是手机不支持**：内核已编入 `dm-user`，系统的 `snapuserd` 是静态二进制，两者都在。缺的是 recovery 侧的控制逻辑；**协议已查清并与本机 daemon 核对过**（12/13 控制消息匹配），详见 `docs/vabc-design.md` |
 | 非 A/B 更新包 | 未实现：xuanyuan 是 A/B 机型，此类包用不上；只加了"包声明了别的机型就拒绝"的安全门 |
 
