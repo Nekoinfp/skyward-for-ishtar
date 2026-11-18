@@ -308,6 +308,120 @@ mod tests {
         out
     }
 
+    /// A sparse image of `chunks`, whose payloads are held rather than
+    /// borrowed, so a test can make them up as it goes.
+    fn sparse_of(block: u32, chunks: &[(u16, u32, Vec<u8>)], crc: Option<u32>) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend(MAGIC);
+        for n in [1u16, 0, 28, 12] {
+            out.extend(n.to_le_bytes());
+        }
+        let blocks: u32 = chunks.iter().map(|c| c.1).sum();
+        let count = chunks.len() as u32 + u32::from(crc.is_some());
+        for n in [block, blocks, count, 0] {
+            out.extend(n.to_le_bytes());
+        }
+        for (kind, blocks, data) in chunks {
+            out.extend(kind.to_le_bytes());
+            out.extend(0u16.to_le_bytes());
+            out.extend(blocks.to_le_bytes());
+            out.extend((12 + data.len() as u32).to_le_bytes());
+            out.extend(data);
+        }
+        if let Some(crc) = crc {
+            out.extend(CRC32.to_le_bytes());
+            out.extend(0u16.to_le_bytes());
+            out.extend(0u32.to_le_bytes());
+            out.extend(16u32.to_le_bytes());
+            out.extend(crc.to_le_bytes());
+        }
+        out
+    }
+
+    /// A deterministic stream, so that a failing round can be looked at again
+    /// by its number.
+    fn stream(seed: &mut u64) -> u64 {
+        *seed ^= *seed << 13;
+        *seed ^= *seed >> 7;
+        *seed ^= *seed << 17;
+        *seed
+    }
+
+    #[test]
+    fn a_made_up_image_expands_the_way_a_plain_walk_over_its_chunks_does() {
+        const BLOCK: u32 = 4096;
+        let mut seed = 0x0f1e_2d3c_4b5a_6978u64;
+        for round in 0..12u32 {
+            // Chunks on both sides of the buffer the reader hands over, so
+            // that the splitting path is entered and left at different
+            // offsets every round.
+            let mut chunks: Vec<(u16, u32, Vec<u8>)> = Vec::new();
+            let mut total = 0u32;
+            for _ in 0..2 + (stream(&mut seed) % 3) {
+                let blocks = match stream(&mut seed) % 4 {
+                    0 => 1,
+                    1 => 1024,
+                    2 => 1025,
+                    _ => 2049,
+                } as u32;
+                if total + blocks > 5000 {
+                    break;
+                }
+                total += blocks;
+                let kind = match stream(&mut seed) % 3 {
+                    0 => RAW,
+                    1 => FILL,
+                    _ => DONT_CARE,
+                };
+                let payload: Vec<u8> = match kind {
+                    RAW => {
+                        let n = blocks as usize * BLOCK as usize;
+                        (0..n).map(|i| (i.wrapping_mul(31) % 251) as u8).collect()
+                    }
+                    FILL => vec![(stream(&mut seed) % 251) as u8, 7, 0xd0, 3],
+                    _ => Vec::new(),
+                };
+                chunks.push((kind, blocks, payload));
+            }
+            if chunks.is_empty() {
+                continue;
+            }
+
+            // What the image says the device should hold afterwards, worked
+            // out separately from the pipeline: the bytes of each chunk, with
+            // a hole left as the device had it.
+            let size = total as usize * BLOCK as usize;
+            let device: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+            let mut expected = device.clone();
+            let mut hasher = crc32fast::Hasher::new();
+            let mut at = 0usize;
+            for (kind, blocks, payload) in &chunks {
+                let len = *blocks as usize * BLOCK as usize;
+                match *kind {
+                    RAW => {
+                        expected[at..at + len].copy_from_slice(payload);
+                        hasher.update(payload);
+                    }
+                    FILL => {
+                        let filled: Vec<u8> = (0..len).map(|i| payload[i % 4]).collect();
+                        expected[at..at + len].copy_from_slice(&filled);
+                        hasher.update(&filled);
+                    }
+                    _ => write_zeroes(&mut hasher, len as u64),
+                }
+                at += len;
+            }
+            let crc = hasher.finalize();
+            let bytes = sparse_of(BLOCK, &chunks, Some(crc));
+
+            let mut input = Cursor::new(bytes.clone());
+            assert_eq!(plan(&mut input, bytes.len() as u64).unwrap().len, size as u64, "round {round}");
+            let mut out = Cursor::new(device);
+            flash(&mut input, bytes.len() as u64, &mut out, &mut |_, _| {}).unwrap_or_else(|e| panic!("round {round}: {e:#}"));
+            assert!(out.get_ref() == &expected, "round {round} did not expand as its chunks say");
+        }
+    }
+
     #[test]
     fn chunks_longer_than_one_buffer_are_written_whole() {
         // Every chunk here is longer than the four-megabyte buffer the reader
