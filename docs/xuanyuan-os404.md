@@ -178,6 +178,7 @@ issue #55 的故障形态，为一个没人需要的节点加这个风险不划�
 | --- | --- | --- |
 | 整仓测试（CI 跑的就是这条） | `cargo test --workspace` | 全部通过，0 失败 |
 | 整仓 lint | `cargo clippy --workspace --all-targets -- -D warnings` | 退出码 0 |
+| `skyward check` 的报告措辞 | `cargo test -p skyward --bin skyward` | 9 项通过 |
 | 构建镜像 | `skyward-pack stock` + `skyward-pack recovery` | 通过，104,857,600 字节 |
 | LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 22 项通过（原有 7 项、扩容与双槽规划 15 项） |
 | sparse 解析与写入 | `cargo test -p skyward-install sparse` | 9 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充、chunk 数上界、跨缓冲的大 chunk、12 轮确定性随机构造） |
@@ -209,12 +210,12 @@ Windows 主机上跑不了整个 workspace：`skyward-bootimg` 的 ramdisk 解�
 ```
 skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img
 104,857,600 字节
-SHA-256 ef214f9c20aa366b255fe517a72e5c6ee9df2f2a3312bbac98cf6aa98bd3a558
+SHA-256 407b05dc4ecb316737ece34f6206d5170c468dd0ba097f6fa54d10e2c1cb10f3
 ```
 
 打包器自己从 4.0.4.0 更新包里取出 recovery 分区并核对了哈希。镜像内容逐项核对过：
 形状与底包一致（`ANDROID!`、header_version 4、kernel 0、同尺寸）、
-`system/bin/recovery` 是 Skyward 本体（8,989,032 字节）、`system/bin/skyward` 与五个
+`system/bin/recovery` 是 Skyward 本体（8,993,768 字节）、`system/bin/skyward` 与五个
 脚本命令链接都在、`skyward/device.toml` 与仓库里的逐字节相同、OMAPI 的二进制与
 VINTF 清单齐全、`prop.default` 末尾是 `ro.secure=0` / `ro.debuggable=1` 且已移除构建
 版本属性。**它没有在任何手机上运行过。**
