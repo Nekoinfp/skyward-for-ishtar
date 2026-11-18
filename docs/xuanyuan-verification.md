@@ -200,6 +200,18 @@ the services the key chain needs
 
 这一条是本适配从第一天起要解决的事，现在**在真机上成立**。
 
+**但要说明白它成立的方式**：服务注册好之后，`/data` 还需要**用户凭据**才挂得上。
+第二次进 recovery 时 `skyward check` 里六个服务同样全部 `registered`、密钥文件也读得到，
+可 `/data` 没有挂——recovery 自己的日志写着：
+
+```
+remembering the decrypt password is on, and no credential is kept
+```
+
+也就是它**停在解密页等输入 PIN**。第一次能读到 `/data`，是因为当时有人在屏幕上输了密码。
+这是设计行为，不是缺陷：FBE 的元数据密钥要用用户凭据解包。
+（凭据没有任何一条被记录，`skyward check` 也只列密钥文件名和大小、不读内容。）
+
 ### 真机第二轮：只读命令与硬件
 
 修好之后又在真机上跑了几个**只读**子命令，结果都落在预期上。
