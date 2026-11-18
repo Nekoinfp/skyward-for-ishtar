@@ -205,6 +205,53 @@ mod tests {
     }
 
     #[test]
+    fn the_hash_descriptor_is_the_shape_this_phones_bootloader_reads() {
+        // Measured off the stock OS4.0.4.0 recovery and the published image:
+        // both put the payload — the partition's name, the salt and the
+        // digest — 132 bytes into the descriptor, with the name's length at
+        // 56. It is not the layout libavb's own header describes (a 16-byte
+        // algorithm and 60 eight-byte reserved words), and neither is the
+        // stock one: this is what the two agree on, so it is what is kept.
+        let d = hash_descriptor(51261440, "recovery", &[7u8; 32], &[9u8; 32]);
+        assert_eq!(&d[24..30], b"sha256");
+        assert_eq!(d[56..60], 8u32.to_be_bytes(), "the name's length");
+        assert_eq!(d[60..64], 32u32.to_be_bytes(), "the salt's");
+        assert_eq!(d[64..68], 32u32.to_be_bytes(), "the digest's");
+        assert_eq!(&d[132..140], b"recovery", "the payload starts here");
+        assert_eq!(&d[140..172], &[7u8; 32], "the salt follows the name");
+        assert_eq!(&d[172..204], &[9u8; 32], "the digest follows the salt");
+        assert_eq!(d.len(), 208, "and the descriptor is padded to eight bytes");
+        assert_eq!(u64::from_be_bytes(d[8..16].try_into().unwrap()), 192, "the count of bytes after the header");
+    }
+
+    #[test]
+    fn the_footer_names_the_image_and_hashes_it() {
+        let image = vec![b'S'; 4096 * 3];
+        let out = footed(&image, "recovery", 81920, &SALT, &[]).unwrap();
+        let footer = &out[out.len() - FOOTER_LEN..];
+        assert_eq!(&footer[..4], b"AVBf");
+        assert_eq!(u64::from_be_bytes(footer[12..20].try_into().unwrap()), image.len() as u64, "the image's own length");
+        let at = u64::from_be_bytes(footer[20..28].try_into().unwrap()) as usize;
+        let size = u64::from_be_bytes(footer[28..36].try_into().unwrap()) as usize;
+        let v = &out[at..at + size];
+        assert_eq!(&v[..4], b"AVB0");
+        // The hash descriptor is the first descriptor of an unsigned image.
+        let start = 256 + u64::from_be_bytes(v[12..20].try_into().unwrap()) as usize + u64::from_be_bytes(v[96..104].try_into().unwrap()) as usize;
+        let d = &v[start..];
+        let (name_len, salt_len, digest_len) = (
+            u32::from_be_bytes(d[56..60].try_into().unwrap()) as usize,
+            u32::from_be_bytes(d[60..64].try_into().unwrap()) as usize,
+            u32::from_be_bytes(d[64..68].try_into().unwrap()) as usize,
+        );
+        let body = 132;
+        let name = &d[body..body + name_len];
+        let salt = &d[body + name_len..body + name_len + salt_len];
+        let digest = &d[body + name_len + salt_len..body + name_len + salt_len + digest_len];
+        assert_eq!((name, salt_len), (&b"recovery"[..], SALT.len()));
+        assert_eq!(digest, &Sha256::new().chain_update(salt).chain_update(&image).finalize()[..], "the digest is of the salted image");
+    }
+
+    #[test]
     fn an_image_that_leaves_no_room_for_its_vbmeta_and_footer_is_refused() {
         let image = vec![b'S'; 8192];
         assert!(footed(&image, "recovery", 16384, &SALT, &[]).is_ok(), "a block each for the vbmeta image and the footer");

@@ -223,6 +223,23 @@ SHA-256 407b05dc4ecb316737ece34f6206d5170c468dd0ba097f6fa54d10e2c1cb10f3
 VINTF 清单齐全、`prop.default` 末尾是 `ro.secure=0` / `ro.debuggable=1` 且已移除构建
 版本属性。**它没有在任何手机上运行过。**
 
+对它做了一次结构审计（`tools/audit-image.py`，32 项检查全过）——查的都是 bootloader
+在运行任何代码之前会读的东西：
+
+| 检查 | 结果 |
+| --- | --- |
+| boot 头 | `ANDROID!`、v4、头长 1584、kernel 0、ramdisk 落在界内 |
+| ramdisk | LZ4 legacy 解出 1069 个 newc 条目，以 `TRAILER!!!` 结束 |
+| 关键条目 | `system/bin/recovery`（AArch64 ELF）、`system/bin/skyward` → `recovery`、`skyward/device.toml`、`system/bin/se_omapi` |
+| AVB footer | `AVBf`，声明的镜像长度 51,261,440（补页后），指向 `AVB0` |
+| 哈希描述符 | 覆盖该长度、名字 `recovery`、算法 `sha256`、**摘要等于 sha256(salt + 镜像)** |
+| 属性描述符 | `com.android.build.recovery.fingerprint` |
+
+顺带确认了一件本来会悬着的事：打包器写出的哈希描述符布局与**底包自己完全同构**
+（载荷从 132 字节开始、名字长度在 56），并不是通用 libavb 头里那套 16 字节算法 +
+60 个 8 字节保留字的排法。底包与出货镜像都是这个形状，所以这不是 bug；这个形状已用
+`crates/skyward-pack/src/avb.rs` 里的一个测试钉住，免得以后被"顺手改规范"。
+
 ## 六、明确没有做的部分
 
 1. **recovery 内应用/合并压缩快照（VABC）**
