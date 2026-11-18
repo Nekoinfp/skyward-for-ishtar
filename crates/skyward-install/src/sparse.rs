@@ -53,6 +53,15 @@ pub fn plan<R: Read + Seek>(input: &mut R, file_size: u64) -> Result<Sparse> {
     ensure!(block <= 64 << 20, "sparse block size {block} is too large");
     let len = block.checked_mul(u64::from(long(16))).context("expanded size overflow")?;
     let chunks_count = long(20);
+    // A chunk takes at least its own header out of the file, so a count the
+    // file could not hold is a damaged image rather than a big one. Checking
+    // it before anything is set aside for the chunks keeps a header that names
+    // four billion of them from asking for the room first.
+    let most = file_size / CHUNK_HEADER;
+    ensure!(
+        u64::from(chunks_count) <= most,
+        "{chunks_count} chunks do not fit in a file of {file_size} bytes"
+    );
     let mut at = file_header;
     let mut out_at = 0u64;
     let mut chunks = Vec::with_capacity(chunks_count as usize);
@@ -408,6 +417,17 @@ mod tests {
 
         // Anything that is not a sparse image at all.
         assert!(expands_to(&mut Cursor::new(vec![0u8; 8192]), 4096, magic).is_err());
+    }
+
+    #[test]
+    fn a_header_naming_more_chunks_than_the_file_holds_is_refused() {
+        let raw = [7u8; 4096];
+        let mut bytes = image(4096, &[(RAW, 1, &raw)], None);
+        // The chunk count is the third field of the header, at byte 20.
+        bytes[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
+        let mut input = Cursor::new(bytes.clone());
+        let error = plan(&mut input, bytes.len() as u64).unwrap_err().to_string();
+        assert!(error.contains("do not fit"), "{error}");
     }
 
     #[test]

@@ -119,6 +119,19 @@ LZ4 legacy 帧 + newc cpio。把它 `skyward/device.toml` 解出来后与本分�
 root 不受属主限制；而 `hand_over` 失败会中止**整条密钥启动流程**——这正是上游
 issue #55 的故障形态，为一个没人需要的节点加这个风险不划算。
 
+同一份 ramdisk 里还能看到两件事：
+
+- **没有 `snapuserd`**，`/snapuserd` 相关条目为 0，只有原厂的
+  `system/bin/update_engine_sideload`。也就是说压缩快照这个缺口，出货版同样没有解决，
+  不是本分支独有。
+- `system/etc/recovery.fstab` 里 `/data` 一行**没有 `metadata_encryption=`**，
+  只有 `fileencryption=ice,wrappedkey,keydirectory=/metadata/vold/metadata_encryption`。
+  要注意的是 Skyward 运行时读的是手机的 `/vendor/etc/fstab.qcom`（见
+  `skyward_block::fstab::FILES`），不是这份 recovery fstab，而 vendor 镜像在
+  9.7 GB 的底包里、本次没有取。所以这一条只作为记录：如果哪天报
+  “the phone says its data partition is not encrypted whole”，就是 vendor fstab
+  确实缺这个标志（上游 issue #70 的形态），而不是库或密钥的问题。
+
 ## 五、验证到什么程度
 
 已经跑过、可以复现的：
@@ -126,7 +139,7 @@ issue #55 的故障形态，为一个没人需要的节点加这个风险不划�
 | 范围 | 命令 | 结果 |
 | --- | --- | --- |
 | LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 21 项通过（原有 7 项、扩容与双槽规划 14 项） |
-| sparse 解析与写入 | 独立 harness | 6 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充） |
+| sparse 解析与写入 | 独立 harness | 7 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充、chunk 数上界） |
 | Android 全工作区 | `cargo ndk -t arm64-v8a --platform 30 check --workspace --all-targets` | 通过 |
 | Android 全工作区 lint | `cargo ndk -t arm64-v8a --platform 30 clippy --workspace --all-targets -- -D warnings` | 通过，零告警 |
 
