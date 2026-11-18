@@ -747,7 +747,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let small = partition(dir.path(), "system_a", 8 << 10);
         let data = vec![0x11u8; 12 * 1024];
-        let err = flash_into_logical(&sparse_of(&data), &[small.clone()]).unwrap_err();
+        let err = flash_into_logical(&sparse_of(&data), std::slice::from_ref(&small)).unwrap_err();
         assert!(err.to_string().contains("expands to"), "{err}");
         assert!(std::fs::read(&small).unwrap().iter().all(|&b| b == 0xaa), "the partition is as it was");
     }
@@ -762,7 +762,7 @@ mod tests {
         let mut image = vec![0x77u8; 4096 - 64];
         image.extend_from_slice(b"AVBf");
         image.resize(4096, 0);
-        flash_into_logical(&image, &[path.clone()]).unwrap();
+        flash_into_logical(&image, std::slice::from_ref(&path)).unwrap();
         let got = std::fs::read(&path).unwrap();
         assert_eq!(&got[..4096], &image[..], "the image is where it was written");
         assert!(got[4096..].iter().all(|&b| b == 0xaa), "and its end was not moved to the partition's");
