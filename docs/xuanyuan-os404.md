@@ -213,12 +213,12 @@ Windows 主机上跑不了整个 workspace：`skyward-bootimg` 的 ramdisk 解�
 ```
 skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img
 104,857,600 字节
-SHA-256 7ab6af11d9f480e2bbc6c71d8e597e6e1dc54032856d2545eef1cd4ea91a4614
+SHA-256 8367cca9927b5bf4661a8f7b471c5404596a76fdd53bfaf9c5283e1970fc52bd
 ```
 
 打包器自己从 4.0.4.0 更新包里取出 recovery 分区并核对了哈希。镜像内容逐项核对过：
 形状与底包一致（`ANDROID!`、header_version 4、kernel 0、同尺寸）、
-`system/bin/recovery` 是 Skyward 本体（8,994,568 字节）、`system/bin/skyward` 与五个
+`system/bin/recovery` 是 Skyward 本体（8994824 字节）、`system/bin/skyward` 与五个
 脚本命令链接都在、`skyward/device.toml` 与仓库里的逐字节相同、OMAPI 的二进制与
 VINTF 清单齐全、`prop.default` 末尾是 `ro.secure=0` / `ro.debuggable=1` 且已移除构建
 版本属性。**它没有在任何手机上运行过。**
