@@ -232,10 +232,10 @@ fn copy(from: &mut dyn Read, to: &mut dyn Write) -> Result<u64, Failed> {
                     // its input — a frame with something after it, a zip entry
                     // whose checksum does not match — still gave everything
                     // before that, and a command that stopped short owes the
-                    // script that ran it those bytes.
+                    // script that ran it those bytes. How many there were is
+                    // not given: the count goes back with the failure.
                     if filled > 0 {
                         to.write_all(&chunk[..filled]).map_err(Failed::Writing)?;
-                        copied += filled as u64;
                     }
                     return Err(Failed::Reading(e));
                 }
