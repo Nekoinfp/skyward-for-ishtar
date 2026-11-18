@@ -353,7 +353,7 @@ Windows 主机上跑不了整个 workspace：`skyward-bootimg` 的 ramdisk 解�
 ```
 skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img
 104,857,600 字节
-SHA-256 31ff629ef854529d6c712328b0aa030e1b2b561cd3d55fbb76b2dde157ca3dcc
+SHA-256 6d1ba48673853b4f65e45d5dba565e50d415cb53b1c7f425d5874d90ba75fa36
 ```
 
 打包器自己从 4.0.4.0 更新包里取出 recovery 分区并核对了哈希。镜像内容逐项核对过：
