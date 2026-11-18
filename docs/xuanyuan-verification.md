@@ -124,6 +124,7 @@ every path the configuration names is in the firmware ok
 | 压缩快照更新失败时界面会让人以为在等 | 状态文案是"此类更新需在系统中合并，启动系统后将自动合并" |
 | 配置里点名的库路径漏了 `/odm/lib64` | 查过二进制依赖：`/odm/lib64` 里那几个 `libjc_keymint*` 属于 **StrongBox** 版 keymint，配置启动的是 TEE 版（链接 `/vendor/lib64/libqtikeymint.so`），不需要加 |
 | 两个 crate 各有一份"进程还在跑吗" | 确实重复。已合并为 `skyward_sys::running`，并补了真正起进程的测试 |
+| 压缩快照读不了时，能不能退回"更新前的内容"先对付用 | **不能**：版本与补丁级别是从挂载分区的 `build.prop` 读的（`installed_props`），退回旧内容会把补丁读旧，keymint 仍会拒密钥，而四个服务却显示"已注册"——比现在的明确拒绝更糟。详见 `docs/vabc-design.md` |
 
 ---
 
