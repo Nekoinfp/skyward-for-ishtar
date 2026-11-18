@@ -136,7 +136,7 @@ every path the configuration names is in the firmware ok
 | OTA 安装、切槽、开机 | 需要设备 |
 | 逻辑分区扩容后能否挂载 | 需要设备（`super` 元数据改动不可逆，先备份） |
 | sparse super 实际写盘 | 需要设备 |
-| 压缩快照/增量 OTA | 未实现。**但不是手机不支持**：内核已编入 `dm-user`，系统的 `snapuserd` 是静态二进制，两者都在。缺的是 recovery 侧的控制逻辑，且没有真机不敢写——详见 `docs/vabc-design.md` |
+| 压缩快照/增量 OTA | 未实现。**但不是手机不支持**：内核已编入 `dm-user`，系统的 `snapuserd` 是静态二进制，两者都在。缺的是 recovery 侧的控制逻辑；**协议已查清并与本机 daemon 核对过**（12/13 控制消息匹配），详见 `docs/vabc-design.md` |
 | 非 A/B 更新包 | 未实现：xuanyuan 是 A/B 机型，此类包用不上；只加了"包声明了别的机型就拒绝"的安全门 |
 
 ---

@@ -60,13 +60,69 @@ the update's snapshots are compressed and served by snapuserd, which this recove
 
 ### A. 实现 snapuserd 模式（完整做法）
 
-- 把系统里的静态 `snapuserd` 取出来（复制进 recovery，或从挂载的 `/mnt/system` 直接执行）；
-- 建 **dm-user** 设备（内核已支持），把 daemon 的 misc 设备作为 target；
-- 按 `SnapshotStatus` 里已有的参数（压缩算法、read-ahead 等）启动 daemon 并建 socket；
-- 合并模式下走 daemon 的用户态合并，而不是内核 `snapshot-merge`。
+**协议已经查清**（AOSP `platform/system/core`，`fs_mgr/libsnapshot/snapuserd/`）：
 
-风险：内核 `dm-user` 的消息协议与 `snapuserd` 的 socket 协议必须逐字节对上；
-**协议错一步，合并会写到错的地方**，而这种损坏不是重刷 super 就能恢复的。
+**1. 内核 ↔ 用户态（dm-user 设备）**
+
+- daemon 打开 `/dev/dm-user/<misc_name>`（`O_RDWR`），内核用这个字符设备收发请求。
+- 请求头是 40 字节的 `struct dm_user_header { u64 seq, type, flags, sector, len }`（packed）。
+  `type`：`DM_USER_REQ_MAP_READ = 0`、`DM_USER_REQ_MAP_WRITE = 1`。
+  **写请求不会被接受**——分区是只读挂载的。
+- 回复：把同一个头改写为 `DM_USER_RESP_SUCCESS = 0`（或 `DM_USER_RESP_ERROR = 1`），
+  与数据一起写回；后续分片只写数据、不再带头。
+- COW 盘上格式：`disk_header { magic = 0x70416e53, valid, version = 1, chunk_size }`，
+  其后是 `disk_exception { old_chunk, new_chunk }` 表。
+
+**2. 控制方 ↔ daemon（文本 socket）**
+
+抽象命名空间（`ANDROID_SOCKET_NAMESPACE_RESERVED`）的 `SOCK_STREAM`，消息是逗号分隔的纯文本：
+
+| 发送 | 回复 |
+| --- | --- |
+| `query` | `active` / `passive` |
+| `init,<misc>,<cow>,<backing>[,<base_path_merge>]` | `success,<扇区数>` |
+| `start,<misc>` | `success` |
+| `delete,<control device>` | `success` |
+| `initiate_merge,<misc>` / `pause_merge` / `resume_merge` | `success` |
+| `merge_percent` | 数字 |
+| `getstatus,<misc>` | 状态串 |
+| `update-verify` | `success` |
+| `supports,second_stage_socket_handoff` | `success` |
+| `stop` / `detach` | — |
+
+daemon 由 init 启动（`ctl.start=snapuserd`），就绪属性 `snapuserd.ready`，
+存活标记文件在 `/metadata/ota/` 下。
+
+**3. 这台手机上的 daemon 与 AOSP 的协议对得上**
+
+拿 4.0.4.0 的 `system/bin/snapuserd`（静态、AArch64）逐条比对 AOSP main 的客户端代码：
+
+| 消息 | 在该二进制里 |
+| --- | --- |
+| `query`、`start`、`init`、`delete` | 各 1 处精确匹配 |
+| `initiate_merge`、`merge_percent`、`getstatus`、`update-verify` | 各 1 处 |
+| `pause_merge`、`resume_merge`、`detach`、`stop` | 各 1 处 |
+| `second_stage_socket_handoff` | **没有** |
+| `/dev/dm-user/`、`snapuserd.ready`、`snapshot-merge` | 都在 |
+
+也就是说：**核心控制协议与 AOSP 一致，但这台的 daemon 早于"两阶段 socket 移交"那版**
+（`second_stage_socket_handoff` 是更新才有的能力）。实现时要走**旧的 attach 路径**，
+不能假设有移交。
+
+（`init.svc.snapuserd` 在这个二进制里没有属正常：那是 libsnapshot **客户端**用的字符串，
+不在 daemon 里；daemon 自己设的是 `snapuserd.ready`，它有两处。）
+
+**4. 这改变了工作量的判断**
+
+**压缩与 COW 的解码全部在 daemon 里**，我们这侧不需要实现 XZ/ZSTD 操作符、
+不需要懂 COW 的压缩格式。我方只需要三件事：
+
+1. 把系统里那个**静态** `snapuserd` 跑起来（已验证它是静态链接）；
+2. 按上面那张表建 **dm-user** 设备、发控制消息；
+3. 合并时改用 daemon 的用户态合并，而不是内核 `snapshot-merge`。
+
+风险仍在（协议顺序错、掉电时机错会留下半合并状态），但**不再是"几千行魔改"**，
+而是"几百行、接口明确"的对接工作。
 
 ### B. 只读回退：快照读不了时，退回快照的"基线"——**查过之后结论是：不该做**
 
@@ -89,7 +145,7 @@ the update's snapshots are compressed and served by snapuserd, which this recove
 
 ### 结论
 
-**A 是唯一真正的解。** 在拿到真机之前，正确的做法是保持现状：
+**A 是唯一真正的解**，而且它的接口现在已经查清（见上）。在拿到真机之前，正确的做法是保持现状：
 整体拒绝、界面与 `skyward check` 明说是"有更新在飞、去系统里合并"。
 这条现状本身是对的，不是缺口。
 
