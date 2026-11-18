@@ -18,8 +18,10 @@ skyward-block = { path = "../skyward-block" }
 # The phone's own stores are sqlite databases, read on the phone and in the
 # tests of the readers.
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+# The log the phone keeps, where what the recovery did is written; and the
+# one way both this and the recovery find a process that is still running,
+# which is read off /proc and so is tried on the computer as well.
+skyward-sys = { path = "../skyward-sys" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 libc = { workspace = true }
-# The log the phone keeps, where what the recovery did is written.
-skyward-sys = { path = "../skyward-sys" }

@@ -49,12 +49,7 @@ pub fn hardware() -> String {
 
 /// The process running `program`, found the way the recovery's own service
 /// supervisor finds the ones it started: by the executable behind /proc.
-fn running(program: &str) -> Option<u32> {
-    std::fs::read_dir("/proc").ok()?.flatten().find_map(|entry| {
-        let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
-        (std::fs::read_link(entry.path().join("exe")).ok()? == Path::new(program)).then_some(pid)
-    })
-}
+use skyward_sys::running;
 
 /// Make the key service read the installed system's version values, and wait
 /// for it to be back. The values are read from the properties, which the

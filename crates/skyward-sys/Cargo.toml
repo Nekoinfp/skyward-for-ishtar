@@ -8,3 +8,7 @@ license.workspace = true
 anyhow = { workspace = true }
 libc = { workspace = true }
 skyward-block = { path = "../skyward-block" }
+
+[dev-dependencies]
+# A folder to run a program from, in the tests of the process lookup.
+tempfile = "3"

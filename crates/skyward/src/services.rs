@@ -489,13 +489,8 @@ pub fn reachable() -> bool {
     }
 }
 
-/// A process already running `path`.
-pub fn running(path: &str) -> Option<u32> {
-    fs::read_dir("/proc").ok()?.flatten().find_map(|e| {
-        let pid: u32 = e.file_name().to_str()?.parse().ok()?;
-        (fs::read_link(e.path().join("exe")).ok()? == Path::new(path)).then_some(pid)
-    })
-}
+/// A process already running `path`, as the kernel says.
+pub use skyward_sys::running;
 
 /// Wait for a process that is not our child to exit.
 fn wait_for(pid: u32) -> Result<()> {
@@ -543,5 +538,21 @@ mod tests {
         unsafe { cmd.pre_exec(move || hand_over(&[fd])) };
         let status = cmd.status().expect("run sh");
         assert!(status.success(), "the program finds the descriptor it was handed");
+    }
+
+    /// The address a service's socket is bound at: the path, and the exact
+    /// length of it, so that a name with bytes after it is not taken as part
+    /// of the address.
+    #[test]
+    fn the_socket_address_is_the_path_and_its_length() {
+        let path = std::path::Path::new("/dev/socket/hlos_mink_opener");
+        let (address, length) = socket_address(path);
+        assert_eq!(address.sun_family, libc::AF_UNIX as libc::sa_family_t);
+        let bytes: Vec<u8> = address.sun_path.iter().take(path.as_os_str().len()).map(|c| *c as u8).collect();
+        assert_eq!(bytes, path.as_os_str().as_encoded_bytes());
+        // A family, the path, and the byte that ends it: no more, so that the
+        // zeroes after it are not read as another name.
+        assert_eq!(length as usize, 2 + path.as_os_str().len() + 1);
+        assert_eq!(address.sun_path[path.as_os_str().len()], 0);
     }
 }

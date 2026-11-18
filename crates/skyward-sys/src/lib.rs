@@ -35,6 +35,19 @@ pub fn prop(_name: &str) -> Option<String> {
     None
 }
 
+/// The process running the program at `path`, found by the executable behind
+/// /proc: the recovery's own supervisor waits on what it starts by this, and
+/// the key service is restarted and waited for by it.
+///
+/// This reads /proc on any system, so it is tried on the computer as well as
+/// on the phone.
+pub fn running(path: &str) -> Option<u32> {
+    std::fs::read_dir("/proc").ok()?.flatten().find_map(|entry| {
+        let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
+        (std::fs::read_link(entry.path().join("exe")).ok()? == Path::new(path)).then_some(pid)
+    })
+}
+
 /// A system property read as a yes or a no, the way Android reads one;
 /// `default` where it is unset or says neither.
 pub fn bool_prop(name: &str, default: bool) -> bool {
@@ -287,6 +300,47 @@ fn without_levels(log: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whether a program is still running is what the supervisor waits on: a
+    /// service that has already ended must not be waited out for twenty
+    /// seconds, and one that is there must not be taken for gone.
+    #[test]
+    fn a_program_running_from_a_path_is_found_by_that_path() {
+        let dir = tempfile::tempdir().expect("a folder");
+        // A copy of a program that stays up, so the path it runs from is this
+        // one and nothing else on the machine matches.
+        let at = dir.path().join("skyward-test-sleeper");
+        std::fs::copy("/bin/sleep", &at).expect("copy a program");
+        let mut child = std::process::Command::new(&at).arg("30").spawn().expect("start it");
+        let shown = at.to_string_lossy().into_owned();
+        let mut found = None;
+        for _ in 0..300 {
+            if let Some(pid) = running(&shown) {
+                found = Some(pid);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let pid = found.unwrap_or_else(|| panic!("the program running as {shown} was not found"));
+        assert_eq!(pid, child.id(), "the one found is the one started");
+        child.kill().expect("stop it");
+        child.wait().expect("reap it");
+        let mut still = Some(pid);
+        for _ in 0..300 {
+            if running(&shown).is_none() {
+                still = None;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(still, None, "a program that has ended is not still running");
+    }
+
+    #[test]
+    fn a_program_no_one_runs_is_not_found() {
+        assert_eq!(running("/nonexistent/skyward-is-not-here"), None);
+        assert_eq!(running("sleep"), None, "a bare name is a path no process has");
+    }
 
     #[test]
     fn kernel_log_lines_lose_their_levels() {
