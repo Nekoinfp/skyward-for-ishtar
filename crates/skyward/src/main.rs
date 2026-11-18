@@ -201,6 +201,15 @@ enum Cmd {
         #[arg(long, conflicts_with = "credential")]
         close: bool,
     },
+    /// Say what opening the data partition needs, and whether each part is in
+    /// place: the phone's own table, the key it keeps, the services the key
+    /// chain runs, and what each of those services said on its own error
+    /// output. Nothing is written and nothing is changed.
+    #[cfg(target_os = "android")]
+    Check {
+        #[arg(long, default_value = "/skyward/device.toml")]
+        config: PathBuf,
+    },
     /// Drive the panel and touchscreen with the recovery UI.
     #[cfg(target_os = "android")]
     Ui {
@@ -425,6 +434,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         #[cfg(target_os = "android")]
+        Cmd::Check { config } => check(&config),
+        #[cfg(target_os = "android")]
         Cmd::Ui { config, font, mono, unlock, dump } => {
             let cfg = DeviceConfig::load(&config)?;
             let start = if unlock { skyward_ui::app::Screen::Decrypt } else { skyward_ui::app::Screen::Home };
@@ -435,6 +446,127 @@ fn main() -> Result<()> {
 
 fn booted_slot() -> Result<skyward_vab::Slot> {
     skyward_vab::current_slot()?.context("not an A/B device")
+}
+
+/// The lines of a service's own error output that are kept, from its end.
+#[cfg(target_os = "android")]
+const SAID_LINES: usize = 12;
+
+/// Say what opening the data partition needs, and whether each part is in
+/// place.
+///
+/// This is the report to paste back when the partition does not open. Every
+/// look is made on its own and a look that cannot be made says so: a report
+/// that stopped at the first gap would be the one thing it is not for. The
+/// names of the keys are printed and never what they hold.
+#[cfg(target_os = "android")]
+fn check(config: &Path) -> Result<()> {
+    let cfg = DeviceConfig::load(config)?;
+    println!("skyward {} for {}", skyward_info::VERSION, cfg.device.codename);
+    if let Some(stock) = &cfg.stock {
+        let sum = stock.recovery.get(..16).unwrap_or(&stock.recovery);
+        println!("packed on {}, from the recovery partition {sum}…", stock.version);
+    }
+    let slot = skyward_vab::current_slot().ok().flatten();
+    println!("running from slot {}", slot.map_or("unknown".to_string(), |s| s.letter().to_string()));
+    match slot.map(skyward_info::installed_props).transpose() {
+        Ok(Some(props)) => {
+            let said = |name: &str| props.get(name).map_or("(unset)", String::as_str).to_string();
+            println!(
+                "installed system {} (Android {}, patch {})",
+                said("ro.build.version.incremental"),
+                said("ro.build.version.release"),
+                said("ro.build.version.security_patch")
+            );
+        }
+        _ => println!("installed system: its build properties could not be read"),
+    }
+
+    println!();
+    println!("the phone's own table");
+    for file in skyward_block::fstab::FILES {
+        println!("  {file}: {}", if Path::new(file).exists() { "there" } else { "not there" });
+    }
+    match skyward_block::fstab::read("/data") {
+        Ok(entries) if entries.is_empty() => println!("  it says nothing about /data"),
+        Ok(entries) => {
+            let entry = &entries[0];
+            println!("  /data");
+            println!("    device               {}", entry.device);
+            println!("    filesystem           {}", entry.filesystem);
+            for name in ["metadata_encryption", "keydirectory", "fileencryption"] {
+                println!("    {name:<20} {}", entry.extra(name).unwrap_or("(none)"));
+            }
+            // Without this the partition cannot be mapped at all, and the
+            // reason names it, so it is worth saying which it is.
+            if entry.extra("metadata_encryption").is_none() {
+                println!("    note: no metadata_encryption, so this table says the partition is not encrypted whole");
+            }
+            match skyward_crypto::data::key_dir(entry) {
+                Ok(dir) => match std::fs::metadata(dir.join("key")) {
+                    Ok(m) => println!("  the key it keeps     {} ({} bytes)", dir.join("key").display(), m.len()),
+                    Err(e) => println!("  the key it keeps     {} ({e})", dir.join("key").display()),
+                },
+                Err(e) => println!("  the key it keeps     ({e:#})"),
+            }
+            match skyward_block::fstab::device(entry) {
+                Ok(device) => println!("  /data is read through {device}"),
+                Err(e) => println!("  /data is read through ({e:#})"),
+            }
+        }
+        Err(e) => println!("  it could not be read: {e:#}"),
+    }
+
+    println!();
+    println!("the services the key chain needs");
+    let mut any = false;
+    for s in &cfg.services {
+        if let Some(name) = &s.ready_service {
+            any = true;
+            let state = match services::registered(name) {
+                true => "registered",
+                false => "NOT registered",
+            };
+            println!("  {state:<15} {name}");
+        }
+    }
+    if !any {
+        println!("  (the configuration names none)");
+    }
+
+    println!();
+    match skyward_vab::snapshot_state() {
+        Ok(state) => println!("an update in flight: {state:?}"),
+        Err(e) => println!("an update in flight: ({e:#})"),
+    }
+
+    say_what_the_services_said();
+    Ok(())
+}
+
+/// Print the error output each of the phone's own programs has kept, its last
+/// lines, so that a program that cannot start is read rather than guessed at.
+#[cfg(target_os = "android")]
+fn say_what_the_services_said() {
+    let dir = Path::new("/skyward/run/services");
+    let mut logs: Vec<PathBuf> = match std::fs::read_dir(dir) {
+        Ok(entries) => entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "log")).collect(),
+        Err(_) => Vec::new(),
+    };
+    if logs.is_empty() {
+        return;
+    }
+    logs.sort();
+    println!();
+    println!("what the services said");
+    for log in logs {
+        let Ok(text) = std::fs::read_to_string(&log) else { continue };
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        println!("  {} ({} lines)", log.display(), lines.len());
+        for line in lines.iter().skip(lines.len().saturating_sub(SAID_LINES)) {
+            println!("    | {line}");
+        }
+    }
 }
 
 fn lp(super_dev: &Path, slot: Option<u32>) -> Result<()> {

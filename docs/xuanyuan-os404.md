@@ -5,7 +5,7 @@
 
 ## 一、`/data` 解密
 
-底包与解密链来自 `zhouzt0121` 的 `origin/os404-adaptation` 分支，本分支另外做了三件事：
+底包与解密链来自 `zhouzt0121` 的 `origin/os404-adaptation` 分支，本分支另外做了四件事：
 
 1. **交接节点前先等它出现**（`crates/skyward/src/main.rs`）
    - 驱动是在自己的线程里 probe 的，`finit_module` 返回时它要交出去的节点往往还没建好。
@@ -30,6 +30,14 @@
    - 现在写到 `/skyward/run/services/<程序名>.log`（追加，超过 64 KiB 时清空重写），
      建立不了就退回 `null`，任何情况都不会让服务因此启动失败。
    - 排查时直接：`adb shell cat /skyward/run/services/android.hardware.security.keymint-service-qti.log`
+
+4. **一条命令产出诊断**（`skyward check`，`crates/skyward/src/main.rs`）
+   - 上面那些信息分散在 fstab、binder、几个日志文件里，真机排查要在 adb 里敲七八条命令。
+   - `adb shell skyward check` 一次打印：底包版本、槽位、已装系统版本、phone 自己的
+     `/data` 表项（`metadata_encryption` / `keydirectory` / `fileencryption`）、
+     密钥文件是否存在（**只打印大小，不打印内容**）、密钥链各服务是否已注册、
+     是否有未合并的更新、以及每个服务自己错误的最后 12 行。
+   - 全部只读；每一项单独探测，探不到就写「探不到」，不会因为一项失败就停下。
 
 上游 issue #64 记录的直接原因是 `keymint` 缺 `libvndksupport.so`；适配分支已经通过
 `provide_system_libraries()` 从已安装系统补 `libvndksupport.so` 与 `libdl_android.so`，
@@ -233,10 +241,16 @@ target/release/skyward-pack recovery \
    dd if=/dev/block/by-name/super        of=/sdcard/super_stock.img   # 扩容前必须
    ```
 2. **刷入** `recovery_a` / `recovery_b`，`fastboot reboot recovery`。
-3. **解密**：进 recovery，看 `/skyward/run/recovery.log`
+3. **解密**：进 recovery，先跑一次自检
+   ```sh
+   adb shell skyward check
+   ```
+   它把槽位、底包、已装系统、`/data` 表项、密钥文件大小、密钥链服务是否注册、
+   更新状态，以及每个服务自己错误的最后几行一次打印出来。**这份输出就是排查时最该贴的。**
+   然后看 `/skyward/run/recovery.log`
    - 期望 `keymint` / `gatekeeper` 注册，`/dev/block/dm-* /data f2fs rw`
    - 输锁屏密码后 `/sdcard` 可读
-   - 服务起不来时先看 `/skyward/run/services/<程序名>.log`：
+   - 服务起不来时看 `/skyward/run/services/<程序名>.log`：
      `CANNOT LINK EXECUTABLE` 是缺库，`the service refused the call` 是安全元件/weaver，
      两者处理方式不同
    - 也可以直接跑一次确认库路径：
