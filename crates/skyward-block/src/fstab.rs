@@ -171,6 +171,49 @@ mod tests {
         assert!(modem.extras.iter().any(|e| e == "slotselect"), "one of each slot");
     }
 
+    /// The two `/data` lines the Chinese system's own `/vendor/etc/fstab.qcom`
+    /// carries, copied from the OS4.0.4.0 package whole: options that carry
+    /// values, a value with slashes in it, and a second line for Xiaomi's own
+    /// filesystem.
+    const SHIPPED: &str = "\
+/dev/block/bootdevice/by-name/userdata /data f2fs noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier,inlinecrypt,gc_merge,compress_mode=user,compress_cache,atgc,age_extent_cache latemount,wait,check,formattable,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0,keydirectory=/metadata/vold/metadata_encryption,metadata_encryption=aes-256-xts:wrappedkey_v0,quota,reservedsize=128M,sysfs_path=/sys/devices/platform/soc/1d84000.ufshc,checkpoint=fs
+/dev/block/bootdevice/by-name/userdata /data mifs noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier,inlinecrypt,gc_merge,compress_mode=user,compress_cache,atgc,age_extent_cache latemount,wait,check,formattable,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0,keydirectory=/metadata/vold/metadata_encryption,metadata_encryption=aes-256-xts:wrappedkey_v0,quota,reservedsize=128M,sysfs_path=/sys/devices/platform/soc/1d84000.ufshc,checkpoint=fs
+";
+
+    #[test]
+    fn the_table_the_phone_ships_is_read_as_the_phone_means_it() {
+        let data = entries(SHIPPED);
+        assert_eq!(data.len(), 2, "the phone names its data partition twice, once per filesystem");
+        let first = &data[0];
+        assert_eq!(first.device, "/dev/block/bootdevice/by-name/userdata");
+        assert_eq!(first.mount_point, "/data");
+        assert_eq!(first.filesystem, "f2fs");
+        assert_eq!(first.extra("metadata_encryption"), Some("aes-256-xts:wrappedkey_v0"), "the metadata key is wrapped");
+        assert_eq!(
+            first.extra("fileencryption"),
+            Some("aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0")
+        );
+        assert_eq!(first.extra("keydirectory"), Some("/metadata/vold/metadata_encryption"));
+        assert_eq!(
+            first.extra("sysfs_path"),
+            Some("/sys/devices/platform/soc/1d84000.ufshc"),
+            "a value that has slashes in it"
+        );
+        assert_eq!(first.extra("reservedsize"), Some("128M"));
+        assert_eq!(first.extra("checkpoint"), Some("fs"));
+        assert_eq!(first.extra("quota"), None, "a word on its own carries no value");
+        assert!(first.options.contains(&"inlinecrypt".to_string()), "an option on its own: {:?}", first.options);
+        assert!(
+            first.options.contains(&"reserve_root=32768".to_string()),
+            "and ones that carry a value: {:?}",
+            first.options
+        );
+        assert!(
+            !first.options.iter().any(|o| o.starts_with("metadata_encryption")),
+            "what is said about the encryption is not how to mount it"
+        );
+    }
+
     #[test]
     fn comments_and_short_lines_are_passed_over() {
         assert!(entries("# nothing\n\n/dev/x /y f2fs rw\n").is_empty());

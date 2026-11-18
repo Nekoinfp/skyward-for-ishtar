@@ -161,6 +161,22 @@
    这就是 `provide_system_libraries()` 只补这两个库的理由：其余依赖本就在手边，
    补多了反而会掩盖真正缺的那一环。
 
+10. **这台机器的整张表，Skyward 的解析器读得下来。** 把 4.0.4.0 的
+    `/vendor/etc/fstab.qcom` 整份喂给 `skyward_block::fstab::entries`：
+
+    | 项 | 结果 |
+    | --- | --- |
+    | 非空非注释行 | 62 |
+    | 解析出的条目 | **62**（一条没丢） |
+    | `/data` 条目 | 2 条（f2fs 与小米的 mifs） |
+    | `metadata_encryption` | `aes-256-xts:wrappedkey_v0` |
+    | `fileencryption` | `aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0` |
+    | `keydirectory` | `/metadata/vold/metadata_encryption` |
+
+   表里确实把 `/vendor_dlkm`、`/system_dlkm` 挂在自己的同名目录上，与
+   `mount_point()` / `source_dir()` 的假设一致。这两行真机文本已经作为回归用例
+   进了 `crates/skyward-block/src/fstab.rs`（`the_table_the_phone_ships_is_read_as_the_phone_means_it`）。
+
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
 `crates/skyward-lp`：
