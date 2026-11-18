@@ -141,7 +141,7 @@ fn listen(socket: &skyward_config::InitSocket, known: &HashMap<String, u32>) -> 
     // One left by a recovery that ended and was started again would
     // refuse the bind; nothing listens on it any more.
     let _ = fs::remove_file(&path);
-    let address = socket_address(&path);
+    let address = skyward_sys::fds::socket_address(&path);
     if unsafe { libc::bind(fd.as_raw_fd(), (&address.0 as *const libc::sockaddr_un).cast(), address.1) } != 0 {
         return Err(io::Error::last_os_error()).with_context(|| format!("bind {}", path.display()));
     }
@@ -154,18 +154,6 @@ fn listen(socket: &skyward_config::InitSocket, known: &HashMap<String, u32>) -> 
 }
 
 /// A Unix-domain socket address and its exact length, without trailing NULs.
-fn socket_address(path: &Path) -> (libc::sockaddr_un, libc::socklen_t) {
-    use std::os::unix::ffi::OsStrExt;
-    let bytes = path.as_os_str().as_bytes();
-    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
-    address.sun_family = libc::AF_UNIX as libc::sa_family_t;
-    for (slot, byte) in address.sun_path.iter_mut().zip(bytes) {
-        *slot = *byte as _;
-    }
-    let length = (std::mem::size_of::<libc::sa_family_t>() + bytes.len() + 1) as libc::socklen_t;
-    (address, length)
-}
-
 /// Who a program runs as and what of root's it keeps, as the phone's own
 /// init has it run, worked out before it is started: between the fork and
 /// the exec nothing may be looked up.
@@ -352,7 +340,7 @@ fn command(s: &Service, who: &Credentials, sockets: &[Listening]) -> Command {
     // every few seconds for as long as the recovery runs.
     unsafe {
         cmd.pre_exec(move || {
-            hand_over(&handed)?;
+            skyward_sys::fds::hand_over(&handed)?;
             who.take_on()
         })
     };
@@ -395,15 +383,6 @@ fn error_output(s: &Service) -> Stdio {
 }
 
 /// Let the descriptors survive the exec that follows, in the child alone.
-fn hand_over(fds: &[libc::c_int]) -> io::Result<()> {
-    for fd in fds {
-        if unsafe { libc::fcntl(*fd, libc::F_SETFD, 0) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    Ok(())
-}
-
 /// Lock in memory every file the running programs have mapped or open on
 /// the `mounted` partitions, so they keep working once those partitions
 /// are written over, and give the mount points the files are on. The
@@ -513,46 +492,5 @@ fn wait_for(pid: u32) -> Result<()> {
         if e.kind() != io::ErrorKind::Interrupted {
             return Err(e).context("wait on the pidfd");
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::hand_over;
-    use std::os::fd::AsRawFd;
-    use std::os::unix::process::CommandExt;
-
-    /// The listener a program is given has to be open in the program: the
-    /// recovery duplicates it close-on-exec so that nothing else gets it, and
-    /// the child clears that for its own exec alone. Without the clearing the
-    /// number the environment names is closed by the time the program looks
-    /// for it, which is how a secure-world daemon ends at once and is started
-    /// again every few seconds.
-    #[test]
-    fn the_listener_a_program_is_given_is_open_in_it() {
-        let file = std::fs::File::open("/dev/null").expect("open /dev/null");
-        let fd = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 50) };
-        assert!(fd >= 50, "the copy is at or above 50, where the environment names it");
-        let mut cmd = std::process::Command::new("sh");
-        cmd.arg("-c").arg(format!("test -e /proc/self/fd/{fd}"));
-        unsafe { cmd.pre_exec(move || hand_over(&[fd])) };
-        let status = cmd.status().expect("run sh");
-        assert!(status.success(), "the program finds the descriptor it was handed");
-    }
-
-    /// The address a service's socket is bound at: the path, and the exact
-    /// length of it, so that a name with bytes after it is not taken as part
-    /// of the address.
-    #[test]
-    fn the_socket_address_is_the_path_and_its_length() {
-        let path = std::path::Path::new("/dev/socket/hlos_mink_opener");
-        let (address, length) = socket_address(path);
-        assert_eq!(address.sun_family, libc::AF_UNIX as libc::sa_family_t);
-        let bytes: Vec<u8> = address.sun_path.iter().take(path.as_os_str().len()).map(|c| *c as u8).collect();
-        assert_eq!(bytes, path.as_os_str().as_encoded_bytes());
-        // A family, the path, and the byte that ends it: no more, so that the
-        // zeroes after it are not read as another name.
-        assert_eq!(length as usize, 2 + path.as_os_str().len() + 1);
-        assert_eq!(address.sun_path[path.as_os_str().len()], 0);
     }
 }
