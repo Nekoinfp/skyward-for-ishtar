@@ -100,6 +100,18 @@
    "devices not brought up"），界面照常显示。所以这台的失败表现应该是
    "密钥服务未注册"，而不是黑屏——`skyward check` 正是为此写的。
 
+6. **配置里指向 `/vendor` 的每一条路径都在真实固件里。** 挂载 4.0.4.0 的 `vendor`
+   分区（742,723,584 字节）后逐个核对：配置启动的九个程序
+   （`init.kernel.post_boot.sh`、`qseecomd`、`ssgtzd`、`hlosminkdaemon`、
+   keymint / gatekeeper / secure_element / boot 四个 HAL、`wpa_supplicant`）全在；
+   `/vendor/lib64/libhardware.so` 与 `/vendor/lib64/hw` 在；两个 WLAN 配置文件
+   （`peach`、`peach_v2`）在；表里 `persist` 与 `modem` 也都写着。
+
+   而 `libvndksupport.so` **不在 vendor**，也不在 recovery 自己的
+   `/system/lib64`（72 个库里没有它）——它只在**已安装系统**的 `/system/lib64`。
+   所以 `provide_system_libraries()` 从系统分区补它是唯一的办法，这也把
+   issue #64 的机制闭合了。
+
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
 `crates/skyward-lp`：
@@ -189,13 +201,32 @@ issue #55 的故障形态，为一个没人需要的节点加这个风险不划�
 - **没有 `snapuserd`**，`/snapuserd` 相关条目为 0，只有原厂的
   `system/bin/update_engine_sideload`。也就是说压缩快照这个缺口，出货版同样没有解决，
   不是本分支独有。
-- `system/etc/recovery.fstab` 里 `/data` 一行**没有 `metadata_encryption=`**，
-  只有 `fileencryption=ice,wrappedkey,keydirectory=/metadata/vold/metadata_encryption`。
-  要注意的是 Skyward 运行时读的是手机的 `/vendor/etc/fstab.qcom`（见
-  `skyward_block::fstab::FILES`），不是这份 recovery fstab，而 vendor 镜像在
-  9.7 GB 的底包里、本次没有取。所以这一条只作为记录：如果哪天报
-  “the phone says its data partition is not encrypted whole”，就是 vendor fstab
-  确实缺这个标志（上游 issue #70 的形态），而不是库或密钥的问题。
+- `system/etc/recovery.fstab`（出货版用的那份）里 `/data` 一行**没有
+  `metadata_encryption=`**，只有
+  `fileencryption=ice,wrappedkey,keydirectory=/metadata/vold/metadata_encryption`。
+  但 Skyward 运行时读的是手机的 `/vendor/etc/fstab.qcom`
+  （见 `skyward_block::fstab::FILES`），不是这份 recovery fstab。
+
+  **这一条已经查实**：从 4.0.4.0 底包里取出 `vendor` 分区（742,723,584 字节）挂载后，
+  真实的 `/vendor/etc/fstab.qcom` 第 88 行是：
+
+  ```
+  /dev/block/bootdevice/by-name/userdata /data f2fs ... latemount,wait,check,formattable,
+    fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0,
+    keydirectory=/metadata/vold/metadata_encryption,
+    metadata_encryption=aes-256-xts:wrappedkey_v0,
+    quota,reservedsize=128M,sysfs_path=/sys/devices/platform/soc/1d84000.ufshc,checkpoint=fs
+  ```
+
+  所以这台**用的是 metadata encryption，且密钥是包裹（wrapped）的**：
+  FBE v2 + inlinecrypt，元数据密钥由 `wrappedkey_v0` 包着，解包要走 keymint，
+  而锁屏密码的保护走 weaver。**这解释了“密钥服务起不来 → /data 打不开”为什么成立**：
+  不是少了某条挂载标志，而是没有可用的包裹密钥。上游 issue #64 补
+  `libvndksupport.so` 让 keymint 能起来，与本分支的链正好对上。
+  `keydirectory` 也与 `skyward_crypto::data::key_dir` 读到的一致。
+
+  同一份表里还有第二条 `/data`（类型 `mifs`，小米自己的文件系统），
+  `fstab::read("/data")` 取第一条，也就是 f2fs 那条。
 
 ## 五、验证到什么程度
 
