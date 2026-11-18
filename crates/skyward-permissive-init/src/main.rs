@@ -62,7 +62,7 @@ unsafe extern "C" fn main(_argc: libc::c_int, argv: *const *const libc::c_char, 
 unsafe fn open_enforce() -> libc::c_int {
     unsafe {
         libc::mkdir(MOUNT.as_ptr().cast(), 0o700);
-        if libc::mount(b"selinuxfs\0".as_ptr().cast(), MOUNT.as_ptr().cast(), b"selinuxfs\0".as_ptr().cast(), 0, std::ptr::null()) != 0 {
+        if libc::mount(c"selinuxfs".as_ptr().cast(), MOUNT.as_ptr().cast(), c"selinuxfs".as_ptr().cast(), 0, std::ptr::null()) != 0 {
             libc::rmdir(MOUNT.as_ptr().cast());
             return -1;
         }
@@ -84,10 +84,11 @@ unsafe fn watch(fd: libc::c_int) {
         }
         let mut b = [0u8; 1];
         let n = unsafe { libc::pread(fd, b.as_mut_ptr().cast(), 1, 0) };
-        if n == 1 && b[0] == b'1' {
-            if unsafe { libc::pwrite(fd, b"0".as_ptr().cast(), 1, 0) } == 1 && turned_off_at.is_none() {
-                turned_off_at = Some(tick);
-            }
+        if n == 1 && b[0] == b'1'
+            && unsafe { libc::pwrite(fd, b"0".as_ptr().cast(), 1, 0) } == 1
+            && turned_off_at.is_none()
+        {
+            turned_off_at = Some(tick);
         }
         unsafe { libc::usleep(POLL_US) };
     }

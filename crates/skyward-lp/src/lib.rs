@@ -771,7 +771,7 @@ pub fn encode_metadata(metadata: &Metadata) -> Result<Vec<u8>> {
 fn device_range(device: &BlockDevice) -> Result<std::ops::Range<u64>> {
     let sectors = device.size / SECTOR_SIZE;
     ensure!(
-        device.size % SECTOR_SIZE == 0,
+        device.size.is_multiple_of(SECTOR_SIZE),
         "{} is not a whole number of sectors",
         device.partition_name
     );
@@ -857,7 +857,7 @@ fn aligned_sector(device: &BlockDevice, sector: u64) -> Result<u64> {
     let bytes = sector
         .checked_mul(SECTOR_SIZE)
         .context("alignment calculation overflow")?;
-    let since_offset = bytes.checked_sub(offset).unwrap_or(0);
+    let since_offset = bytes.saturating_sub(offset);
     let misalignment = since_offset % alignment;
     if misalignment == 0 {
         Ok(sector)
@@ -902,7 +902,7 @@ pub fn grow_avoiding(
     );
     let growth = new_size - old_size;
     ensure!(
-        growth % SECTOR_SIZE == 0,
+        growth.is_multiple_of(SECTOR_SIZE),
         "growth is not a whole number of sectors"
     );
     ensure!(!partition.extents.is_empty(), "{name} has no extents");
