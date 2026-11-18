@@ -112,7 +112,16 @@ daemon 由 init 启动（`ctl.start=snapuserd`），就绪属性 `snapuserd.read
 （`init.svc.snapuserd` 在这个二进制里没有属正常：那是 libsnapshot **客户端**用的字符串，
 不在 daemon 里；daemon 自己设的是 `snapuserd.ready`，它有两处。）
 
-**4. 这改变了工作量的判断**
+**4. 协议代码已经写好并测过**（`crates/skyward-vab/src/dmuser.rs`，9 项测试）：
+
+- `Header`：40 字节的编解码、应答构造、长度是否装得下；
+- `Asked` / `Answered`：**同一个数值在两个方向上含义不同**（0 = 读 / 成功，1 = 写 / 错误），
+  所以用两个枚举按方向解读，而不是一个整数加注释；
+- `Request` / `Reply`：13 条控制消息与回复的文本编解码，未知消息**报错而非静默丢弃**。
+
+写这些时**没有真机**，因为全是纯值；接线（打开 dm-user、启动 daemon、驱动合并）才是需要设备的下一步。
+
+**5. 这改变了工作量的判断**
 
 **压缩与 COW 的解码全部在 daemon 里**，我们这侧不需要实现 XZ/ZSTD 操作符、
 不需要懂 COW 的压缩格式。我方只需要三件事：

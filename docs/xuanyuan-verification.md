@@ -16,7 +16,7 @@
 | --- | --- |
 | 镜像 | `skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img` |
 | 大小 | 104,857,600 字节（与底包 recovery 分区同尺寸） |
-| SHA-256 | `6d1ba48673853b4f65e45d5dba565e50d415cb53b1c7f425d5874d90ba75fa36` |
+| SHA-256 | `0ea17d300e4259408dacf8373cc57380aac6369ae8dfcdf4ec709bd7e1f3d3ea` |
 | 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,256,277 字节 |
 | 内含 recovery 本体 | 8994312 字节，AArch64 ELF |
 | 底包 | OS4.0.4.0.XOACNXM，recovery 分区 SHA-256 `55f491052a360bc15362fd80c8bd2dd0912b289e1653f2bd7f9c5a12e7fea27b`（打包器自行核对） |
@@ -43,7 +43,7 @@
 | `cargo build --locked --release -p skyward-pack` | 退出码 0 |
 
 其中与本适配直接相关的用例数：`skyward-install` 169、`skyward-lp` 23、
-`skyward-block` 37、`skyward-pack` 13、`skyward` 二进制自己 22（报告 9、硬件描述改写 4、库拷贝 3、目录搜索 6），`skyward-sys` 47（含描述符移交与"进程还在跑吗"）。
+`skyward-block` 37、`skyward-pack` 13、`skyward` 二进制自己 22（报告 9、硬件描述改写 4、库拷贝 3、目录搜索 6），`skyward-sys` 47（含描述符移交与"进程还在跑吗"）、`skyward-vab` 39（含 dm-user 与 snapuserd 控制协议 9 项）。
 
 稳定性：整个 workspace 连跑 15 次无失败；修掉一处偶发（并行测试把彼此的 `flock`
 当成对手）后，avbctl 连跑 60 次无失败。
