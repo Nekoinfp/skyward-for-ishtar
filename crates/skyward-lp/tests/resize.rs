@@ -1,5 +1,5 @@
 use skyward_lp::{
-    commit, encode_geometry, encode_metadata, grow, grow_avoiding, read, BlockDevice, Extent,
+    commit, encode_geometry, encode_metadata, grow, grow_across, grow_avoiding, read, BlockDevice, Extent,
     Geometry, Group, Metadata, Partition, SECTOR_SIZE,
 };
 use std::path::PathBuf;
@@ -143,6 +143,106 @@ fn growth_keeps_clear_what_another_slot_holds() {
     // could put anything, and is not a reason to refuse.
     let elsewhere = [(9usize, 0u64..8u64)];
     assert!(grow_avoiding(&md, "system", 24 * SECTOR_SIZE, &elsewhere).is_ok());
+}
+
+/// A slot of super holding one partition, at `sector`, of `sectors` sectors.
+fn slot(name: &str, sector: u64, sectors: u64) -> Metadata {
+    let mut md = metadata();
+    md.damaged.clear();
+    md.partitions = vec![Partition {
+        name: name.into(),
+        attributes: 0,
+        group: 0,
+        extents: vec![Extent::Linear {
+            sectors,
+            device: 0,
+            sector,
+        }],
+    }];
+    md.groups[0].maximum_size = 0;
+    md
+}
+
+/// Every sector either plan gives to a partition.
+fn sectors(md: &Metadata) -> Vec<(usize, std::ops::Range<u64>)> {
+    let mut found = Vec::new();
+    for part in &md.partitions {
+        for extent in &part.extents {
+            if let Extent::Linear {
+                device,
+                sector,
+                sectors,
+            } = *extent
+            {
+                found.push((device, sector..sector + sectors));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn two_slots_grow_without_taking_each_others_partitions() {
+    // The two slots' partitions sit next to each other, as super holds them.
+    let (a, b) = (slot("system_a", 160, 8), slot("system_b", 168, 8));
+    let requests = [
+        (a, "system_a".to_string(), 24 * SECTOR_SIZE),
+        (b, "system_b".to_string(), 24 * SECTOR_SIZE),
+    ];
+    let planned = grow_across(&requests).unwrap();
+    assert_eq!(planned[0].partition("system_a").unwrap().bytes(), 24 * SECTOR_SIZE);
+    assert_eq!(planned[1].partition("system_b").unwrap().bytes(), 24 * SECTOR_SIZE);
+    // The first slot's growth had to go past the second slot's partition.
+    assert_eq!(
+        sectors(&planned[0]),
+        [
+            (0, 160..168),
+            (0, 176..192),
+        ],
+        "past the other slot's partition, not over it"
+    );
+    // And the second slot's growth had to go past the first one's new extent.
+    assert_eq!(
+        sectors(&planned[1]),
+        [(0, 168..176), (0, 192..208)],
+        "past what the first plan took, not over it"
+    );
+    // Nothing is given to two partitions at once.
+    let all: Vec<_> = planned.iter().flat_map(sectors).collect();
+    for (index, (device, range)) in all.iter().enumerate() {
+        for (other_device, other) in &all[..index] {
+            assert!(
+                device != other_device || range.end <= other.start || other.end <= range.start,
+                "{device}:{range:?} overlaps {other_device}:{other:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_slot_with_room_already_is_left_exactly_as_it_was() {
+    let (a, b) = (slot("system_a", 160, 8), slot("system_b", 168, 8));
+    let requests = [
+        (a.clone(), "system_a".to_string(), 8 * SECTOR_SIZE),
+        (b.clone(), "system_b".to_string(), 24 * SECTOR_SIZE),
+    ];
+    let planned = grow_across(&requests).unwrap();
+    assert_eq!(planned[0], a, "nothing to plan means nothing changed");
+    assert_eq!(planned[1].partition("system_b").unwrap().bytes(), 24 * SECTOR_SIZE);
+}
+
+#[test]
+fn a_plan_that_would_not_fit_is_refused() {
+    // Both slots would have to grow into the same last few sectors.
+    let mut small = slot("system_a", 160, 8);
+    small.block_devices[0].first_logical_sector = 128;
+    small.block_devices[0].size = 48 * SECTOR_SIZE; // 128..176
+    let b = small.clone();
+    let requests = [
+        (small, "system_a".to_string(), 40 * SECTOR_SIZE),
+        (b, "system_b".to_string(), 40 * SECTOR_SIZE),
+    ];
+    assert!(grow_across(&requests).is_err(), "there is room for one of them, not both");
 }
 
 #[test]

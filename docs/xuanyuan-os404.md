@@ -40,8 +40,9 @@
 
 **一个必须说明的正确性点**：super 里同时放两个槽位的分区，而每个槽位的元数据只描述自己那份。
 于是单看一份元数据去扩容，新 extent 可能正好压在另一槽位的分区上。
-`grow_avoiding` 允许把“别人占用的扇区”传进来一起避开；安装器在规划时传入
-另一槽位的既有 extent 与本次已规划的槽位结果，规划完再整体校验一次。
+`grow_avoiding` 允许把“别人占用的扇区”传进来一起避开；`grow_across` 把多个槽位放在一起规划：
+每个槽位都避开其它槽位的既有 extent 与之前已生成的计划，最后再整体校验一遍。
+双槽规划放在 `skyward-lp` 里而不是安装流程里，就是为了能在电脑上测。
 
 安装流程（`crates/skyward-install/src/run.rs::flash_logical`）：
 
@@ -95,8 +96,8 @@ erofs/f2fs 的超级块在偏移 1024，ext4 的魔数在 1080。
 
 | 范围 | 命令 | 结果 |
 | --- | --- | --- |
-| LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 18 项通过（原有 7 项、扩容 11 项） |
-| sparse 解析与写入 | 独立 harness | 5 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定） |
+| LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 21 项通过（原有 7 项、扩容与双槽规划 14 项） |
+| sparse 解析与写入 | 独立 harness | 6 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞、super 判定、头扩展与尾部填充） |
 | Android 全工作区 | `cargo ndk -t arm64-v8a --platform 30 check --workspace --all-targets` | 通过 |
 | Android 全工作区 lint | `cargo ndk -t arm64-v8a --platform 30 clippy --workspace --all-targets -- -D warnings` | 通过，零告警 |
 

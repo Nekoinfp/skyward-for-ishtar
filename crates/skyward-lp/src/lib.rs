@@ -1059,3 +1059,67 @@ pub fn commit(super_dev: &Path, slot: u32, metadata: &Metadata) -> Result<()> {
     file.sync_all().context("sync committed metadata")?;
     Ok(())
 }
+
+/// The sectors a slot's metadata gives to its partitions, by the index of the
+/// block device they lie on.
+fn linear_extents(metadata: &Metadata) -> Vec<(usize, std::ops::Range<u64>)> {
+    let mut found = Vec::new();
+    for partition in &metadata.partitions {
+        for extent in &partition.extents {
+            if let Extent::Linear {
+                device,
+                sector,
+                sectors,
+            } = *extent
+            {
+                found.push((device, sector..sector + sectors));
+            }
+        }
+    }
+    found
+}
+
+/// Grow one partition in each of several slots of super, planned together.
+///
+/// Super holds every slot's partitions in the same block devices, while each
+/// metadata slot names only its own. A slot grown on its own would therefore
+/// be free to lay a new extent over another slot's partition. Each request is
+/// planned against every other slot's partitions and against the plans before
+/// it, and the plans are checked against each other before any of them is
+/// written; `requests` is one `(metadata, partition, new size)` per slot.
+pub fn grow_across(requests: &[(Metadata, String, u64)]) -> Result<Vec<Metadata>> {
+    let mut planned: Vec<Metadata> = Vec::with_capacity(requests.len());
+    for (index, (metadata, name, new_size)) in requests.iter().enumerate() {
+        let mut taken: Vec<(usize, std::ops::Range<u64>)> = Vec::new();
+        for (other, (their_metadata, _, _)) in requests.iter().enumerate() {
+            if other != index {
+                taken.extend(linear_extents(their_metadata));
+            }
+        }
+        for done in &planned {
+            taken.extend(linear_extents(done));
+        }
+        let current = metadata
+            .partition(name)
+            .with_context(|| format!("no partition named {name}"))?
+            .bytes();
+        let grown = match *new_size > current {
+            true => grow_avoiding(metadata, name, *new_size, &taken)?,
+            false => metadata.clone(),
+        };
+        planned.push(grown);
+    }
+    let mut occupied: Vec<(usize, std::ops::Range<u64>)> = Vec::new();
+    for metadata in &planned {
+        for (device, range) in linear_extents(metadata) {
+            ensure!(
+                !occupied
+                    .iter()
+                    .any(|(d, r)| *d == device && range.start < r.end && r.start < range.end),
+                "the plans of two slots would use the same sectors"
+            );
+            occupied.push((device, range));
+        }
+    }
+    Ok(planned)
+}

@@ -73,12 +73,16 @@ pub fn plan<R: Read + Seek>(input: &mut R, file_size: u64) -> Result<Sparse> {
         let chunk = match kind {
             RAW if payload == chunk_len => Chunk::Raw { source, len: chunk_len },
             FILL if payload == 4 => {
+                // The payload starts past the chunk header, which may be
+                // longer than the twelve bytes every chunk begins with.
+                input.seek(SeekFrom::Start(source))?;
                 let mut pattern = [0; 4];
                 input.read_exact(&mut pattern)?;
                 Chunk::Fill { pattern, len: chunk_len }
             }
             DONT_CARE if payload == 0 => Chunk::Skip { len: chunk_len },
             CRC32 if payload == 4 && blocks == 0 => {
+                input.seek(SeekFrom::Start(source))?;
                 let mut value = [0; 4];
                 input.read_exact(&mut value)?;
                 Chunk::Crc(u32::from_le_bytes(value))
@@ -90,7 +94,10 @@ pub fn plan<R: Read + Seek>(input: &mut R, file_size: u64) -> Result<Sparse> {
         at = source.checked_add(payload).context("sparse offset overflow")?;
     }
     ensure!(out_at == len, "chunks expand to {out_at}, not the declared {len}");
-    ensure!(at == file_size, "sparse image has trailing bytes or a truncated header extension");
+    // Bytes past the last chunk are not part of the image: some tools pad the
+    // file to a round size. Nothing is read from them and they say nothing
+    // about what the image holds, so they are no reason to refuse it. A chunk
+    // that claims more than the file has was already refused above.
     Ok(Sparse { len, chunks })
 }
 
@@ -324,6 +331,28 @@ mod tests {
     }
 
     #[test]
+    fn longer_headers_and_trailing_padding_are_read_as_the_format_says() {
+        let raw: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
+        let bytes = image_with_extensions(4096, &[(RAW, 2, &raw), (FILL, 1, &[9, 8, 7, 6])], 32, 16);
+        let expanded = 3 * 4096u64;
+        let mut input = Cursor::new(bytes.clone());
+        assert_eq!(plan(&mut input, bytes.len() as u64).unwrap().len, expanded, "the extension is skipped, not counted");
+        let mut out = Cursor::new(vec![0xa5u8; expanded as usize]);
+        flash(&mut input, bytes.len() as u64, &mut out, &mut |_, _| {}).unwrap();
+        assert_eq!(&out.get_ref()[..raw.len()], &raw[..]);
+        assert!(out.get_ref()[raw.len()..].chunks(4).all(|b| b == [9, 8, 7, 6]));
+
+        // A tool that pads its file to a round size is still a sparse image.
+        let mut padded = image(4096, &[(RAW, 1, &raw[..4096])], None);
+        padded.extend(std::iter::repeat_n(0u8, 512));
+        let mut input = Cursor::new(padded.clone());
+        assert_eq!(plan(&mut input, padded.len() as u64).unwrap().len, 4096u64, "the padding is not part of the image");
+        let mut out = Cursor::new(vec![0xa5u8; 4096]);
+        flash(&mut input, padded.len() as u64, &mut out, &mut |_, _| {}).unwrap();
+        assert_eq!(out.get_ref(), &raw[..4096]);
+    }
+
+    #[test]
     fn wrong_crc_stops_the_write() {
         let raw = [7u8; 4096];
         let bytes = image(4096, &[(RAW, 1, &raw)], Some(0));
@@ -331,6 +360,29 @@ mod tests {
         let mut out = Cursor::new(vec![0; 4096]);
         let result = flash(&mut input, bytes.len() as u64, &mut out, &mut |_, _| {});
         assert!(result.is_err(), "bad CRC was accepted: {result:?}");
+    }
+
+    /// A sparse image whose headers and chunks are longer than the smallest
+    /// ones Android writes, which a reader that only knew those would misread.
+    fn image_with_extensions(block: u32, chunks: &[(u16, u32, &[u8])], file_header: u16, chunk_header: u16) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend(MAGIC);
+        for n in [1u16, 0, file_header, chunk_header] {
+            out.extend(n.to_le_bytes());
+        }
+        for n in [block, chunks.iter().map(|c| c.1).sum(), chunks.len() as u32, 0] {
+            out.extend(n.to_le_bytes());
+        }
+        out.resize(file_header as usize, 0);
+        for (kind, blocks, data) in chunks {
+            out.extend(kind.to_le_bytes());
+            out.extend(0u16.to_le_bytes());
+            out.extend(blocks.to_le_bytes());
+            out.extend(((chunk_header as usize + data.len()) as u32).to_le_bytes());
+            out.extend(std::iter::repeat_n(0u8, chunk_header as usize - CHUNK_HEADER as usize));
+            out.extend(*data);
+        }
+        out
     }
 
     #[test]
