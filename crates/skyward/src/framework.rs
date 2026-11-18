@@ -36,9 +36,99 @@ fn oldest_version(text: &str) -> String {
     format!("{}version={quote}{OLDEST_VERSION}{quote}{}", &text[..from], &text[to..])
 }
 
+/// The instances a description declares: each HAL's name, and each of the
+/// instances it gives under it.
+///
+/// Two descriptions of one instance are refused by the reader outright — it
+/// drops the whole manifest over the conflict, so no service is found at all
+/// — which is why this is worth reading out of the text.
+pub fn declares(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    let mut name: Option<String> = None;
+    loop {
+        let next_name = rest.find("<name>");
+        let next_fqname = rest.find("<fqname>");
+        let take_name = match (next_name, next_fqname) {
+            (None, None) => break,
+            (Some(at), None) => Some(at),
+            (None, Some(_)) => None,
+            (Some(n), Some(f)) => (n < f).then_some(n),
+        };
+        match take_name {
+            Some(at) => {
+                let after = &rest[at + "<name>".len()..];
+                let Some(end) = after.find("</name>") else { break };
+                name = Some(after[..end].trim().to_string());
+                rest = &after[end + "</name>".len()..];
+            }
+            None => {
+                let at = next_fqname.expect("one of the two was found");
+                let after = &rest[at + "<fqname>".len()..];
+                let Some(end) = after.find("</fqname>") else { break };
+                if let Some(hal) = &name {
+                    out.push((hal.clone(), after[..end].trim().to_string()));
+                }
+                rest = &after[end + "</fqname>".len()..];
+            }
+        }
+    }
+    out
+}
+
+/// Whether two descriptions are of one and the same instance, which a reader
+/// will not have declared twice.
+pub fn collide(one: &str, other: &str) -> bool {
+    let theirs = declares(one);
+    declares(other).iter().any(|instance| theirs.contains(instance))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::as_framework;
+    use super::{as_framework, collide, declares};
+
+    /// The two descriptions this phone actually carries of one weaver: the
+    /// one bundled in the ramdisk, and the one the installed system carries.
+    const BUNDLED_WEAVER: &str = "<!-- The Thales weaver, for a phone whose odm carries it without a description. -->\n<manifest version=\"1.0\" type=\"framework\">\n    <hal format=\"aidl\">\n        <name>android.hardware.weaver</name>\n        <fqname>IWeaver/default</fqname>\n    </hal>\n</manifest>\n";
+    const SYSTEMS_WEAVER: &str = "<manifest version=\"1.0\" type=\"framework\">\n    <hal format=\"aidl\">\n        <name>android.hardware.weaver</name>\n        <version>2</version>\n        <fqname>IWeaver/default</fqname>\n    </hal>\n</manifest>\n";
+
+    #[test]
+    fn a_description_declares_each_instance_it_gives() {
+        assert_eq!(declares(BUNDLED_WEAVER), [("android.hardware.weaver".to_string(), "IWeaver/default".to_string())]);
+        assert_eq!(declares(SYSTEMS_WEAVER).len(), 1);
+        // One name, several instances under it.
+        let both = declares(&[
+            "<manifest>",
+            "<hal><name>android.hardware.secure_element</name>",
+            "<fqname>ISecureElement/SIM1</fqname>",
+            "<fqname>ISecureElement/SIM2</fqname></hal>",
+            "</manifest>",
+        ].join("\n"));
+        assert_eq!(both.len(), 2, "both instances, both under the one name: {both:?}");
+        assert_eq!(both[0].0, "android.hardware.secure_element");
+        assert_eq!(both[1].1, "ISecureElement/SIM2");
+    }
+
+    /// The conflict that stopped every service from registering on the phone:
+    /// the ramdisk's older description of the weaver and the installed
+    /// system's newer one are of the same instance, and the reader drops the
+    /// whole manifest over it, so nothing at all is found.
+    #[test]
+    fn two_descriptions_of_one_instance_are_seen_to_collide() {
+        assert!(collide(BUNDLED_WEAVER, SYSTEMS_WEAVER));
+        assert!(collide(SYSTEMS_WEAVER, BUNDLED_WEAVER), "whichever way round");
+    }
+
+    #[test]
+    fn descriptions_of_different_instances_do_not_collide() {
+        let secure_element = "<manifest><hal><name>android.hardware.secure_element</name><fqname>ISecureElement/eSE1</fqname></hal></manifest>";
+        let omapi = "<manifest><hal><name>android.se.omapi</name><fqname>ISecureElementService/default</fqname></hal></manifest>";
+        assert!(!collide(BUNDLED_WEAVER, secure_element));
+        assert!(!collide(secure_element, omapi), "the interface name alone is not enough");
+        assert!(!collide(omapi, BUNDLED_WEAVER));
+        assert!(!collide("<manifest/>", BUNDLED_WEAVER), "a description of nothing collides with nothing");
+    }
+
 
     #[test]
     fn a_description_of_the_phones_own_hardware_is_taken_as_the_frameworks() {

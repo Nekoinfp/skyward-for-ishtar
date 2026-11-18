@@ -233,6 +233,35 @@ fn image(file: &Path) -> Result<(u64, u64)> {
 /// are taken: the directory reads the whole of its description directory
 /// at once, and one file it cannot make sense of leaves it describing
 /// nothing.
+/// Write `text` into `into` under `from`'s name, dropping any description the
+/// recovery already carries of an instance this one declares.
+///
+/// The installed system is the phone's own account of its hardware, and a
+/// reader refuses two descriptions of one instance by throwing away the whole
+/// manifest — so a fallback the packing put there for the same instance has to
+/// go. Without this the phone's newer weaver (@2) and the ramdisk's older one
+/// (@1) make the reader drop everything, and no service is found at all.
+fn publish_one(into: &Path, from: &Path, text: &str) -> Result<()> {
+    let name = from.file_name().with_context(|| format!("{} names no file", from.display()))?;
+    let to = into.join(name);
+    if let Ok(listing) = fs::read_dir(into) {
+        for entry in listing.flatten() {
+            let other = entry.path();
+            if other == to || other.extension().is_none_or(|e| e != "xml") {
+                continue;
+            }
+            let Ok(theirs) = fs::read_to_string(&other) else { continue };
+            if crate::framework::collide(text, &theirs) {
+                fs::remove_file(&other).with_context(|| format!("drop {}", other.display()))?;
+            }
+        }
+    }
+    fs::write(&to, as_framework(text)).with_context(|| format!("copy {}", from.display()))?;
+    fs::set_permissions(&to, std::os::unix::fs::PermissionsExt::from_mode(0o644))
+        .with_context(|| format!("let every user read {}", to.display()))?;
+    Ok(())
+}
+
 pub fn publish_descriptions(wanted: &[String], files: &[String]) -> Result<usize> {
     let into = Path::new(RECOVERY_DESCRIPTIONS);
     fs::create_dir_all(into).with_context(|| format!("make {}", into.display()))?;
@@ -244,11 +273,7 @@ pub fn publish_descriptions(wanted: &[String], files: &[String]) -> Result<usize
         .with_context(|| format!("open {} to every user", into.display()))?;
     let mut copied = 0;
     let mut take = |from: &Path, text: &str| -> Result<()> {
-        let name = from.file_name().with_context(|| format!("{} names no file", from.display()))?;
-        let to = into.join(name);
-        fs::write(&to, as_framework(text)).with_context(|| format!("copy {}", from.display()))?;
-        fs::set_permissions(&to, std::os::unix::fs::PermissionsExt::from_mode(0o644))
-            .with_context(|| format!("let every user read {}", to.display()))?;
+        publish_one(into, from, text)?;
         copied += 1;
         Ok(())
     };
