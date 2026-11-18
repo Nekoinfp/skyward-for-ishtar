@@ -5,26 +5,23 @@
 
 ## 一、`/data` 解密
 
-底包与解密链来自 `zhouzt0121` 的 `origin/os404-adaptation` 分支，本分支另外做了两件事：
+底包与解密链来自 `zhouzt0121` 的 `origin/os404-adaptation` 分支，本分支另外做了三件事：
 
-1. **ST54L 安全元件节点的属主与等待**（`devices/xuanyuan.toml`、`crates/skyward/src/main.rs`）
-   - `stm_st54se_gpio` 驱动在 `finit_module` 返回之后才异步创建 `/dev/st54spi_gpio`。
-     Android 17 上这个 probe 比模块加载慢，于是 `chown` 会以 `ENOENT` 失败，
-     而旧代码一失败就中断整条密钥启动流程，`keymint` / `gatekeeper` 根本不会启动。
-   - 现在 `hand_over` 对每个待交接节点最多等 5 秒（`wait_for_file`），等到再改属主与权限。
-   - 设备配置里给 `/dev/st54spi_gpio` 加了 `[[owners]]`（`system:system 0660`），
-     与 OS4 上 `android.hardware.secure_element-service.qti` 的运行账号一致。
-     只改这一个节点，不做全局放宽。
+1. **交接节点前先等它出现**（`crates/skyward/src/main.rs`）
+   - 驱动是在自己的线程里 probe 的，`finit_module` 返回时它要交出去的节点往往还没建好。
+     Android 17 上 `stm_st54se_gpio` 就是这样：`chown` 以 `ENOENT` 失败，
+     而旧代码一失败就中断整条密钥启动流程，`keymint` / `gatekeeper` 根本不会启动
+     （就是上游 issue #55 的形态）。
+   - 现在 `hand_over` 对每个待交接节点最多等 5 秒（`wait_for_file`）再改属主与权限。
+   - 注意：`xuanyuan` 的配置里**没有** `[[owners]]`。安全元件服务以 root 运行，
+     root 不受节点属主限制，出货镜像也没有为它加这条；而 `hand_over` 失败是致命的，
+     为一个没人需要的节点加这个风险不划算。见[第四节](#四与出货镜像的对照)。
 
 2. **Binder 调用超时**（`crates/skyward-binder/src/driver.rs`）
    - 安全服务在拿不到安全元件时会一直不回答，驱动默认要等几十秒，界面就卡在解密页。
    - 移植 `transact_within`：在写端之外用 `poll` 等驱动的可读性，weaver 调用给 4 秒上限。
    - 与本分支已有结构（`Waiting` / `exchange` / `take_in`）合并：只有在**没有待告知驱动内容**
    时才先等可读，否则会与“先回执才能继续”的调用互相等死。
-
-上游 issue #64 记录的直接原因是 `keymint` 缺 `libvndksupport.so`；适配分支已经通过
-`provide_system_libraries()` 从已安装系统补 `libvndksupport.so` 与 `libdl_android.so`，
-并给服务补 `/vendor/lib64/hw` 等库路径。本分支沿用该做法，没有扩大范围。
 
 3. **服务的错误输出不再丢弃**（`crates/skyward/src/services.rs`）
    - 之前每个服务都以 `stderr(Stdio::null())` 启动，于是
@@ -33,6 +30,10 @@
    - 现在写到 `/skyward/run/services/<程序名>.log`（追加，超过 64 KiB 时清空重写），
      建立不了就退回 `null`，任何情况都不会让服务因此启动失败。
    - 排查时直接：`adb shell cat /skyward/run/services/android.hardware.security.keymint-service-qti.log`
+
+上游 issue #64 记录的直接原因是 `keymint` 缺 `libvndksupport.so`；适配分支已经通过
+`provide_system_libraries()` 从已安装系统补 `libvndksupport.so` 与 `libdl_android.so`，
+并给服务补 `/vendor/lib64/hw` 等库路径。本分支沿用该做法，没有扩大范围。
 
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
@@ -98,7 +99,27 @@ super 的 geometry 魔数就是 `super`，否则是逻辑分区文件系统镜�
 不必展开整个镜像，也就能在电脑上单独测。
 erofs/f2fs 的超级块在偏移 1024，ext4 的魔数在 1080。
 
-## 四、验证到什么程度
+## 四、与出货镜像的对照
+
+`zhouzt0121` 那个 Release 的实际镜像 `skyward-v1.0.0-xuanyuan-OS4.0.0.18.XOACNXM.img`
+（100 MiB，SHA-256 `f797dcfa…`）是可以直接拆的：它是 v4 boot image，ramdisk 是
+LZ4 legacy 帧 + newc cpio。把它 `skyward/device.toml` 解出来后与本分支逐行 diff，
+**只有两处不同**：
+
+| 项 | 出货版 | 本分支 |
+| --- | --- | --- |
+| `[stock]` | `OS4.0.0.18.XOACNXM` | `OS4.0.4.0.XOACNXM`（哈希已核，见上） |
+| 其它 | — | 多一段说明注释 |
+
+也就是说服务链（10 条）、WLAN、`[firmware]`、`[partitions] mounted`、`[logd]`、
+`[touch]`、`[display]` 与出货配置**完全一致**。
+
+对照过程中我删掉了自己先前加的一条 `[[owners]]`（把 `/dev/st54spi_gpio` 改成
+`system:system 0660`）。理由是三条：出货配置没有它；安全元件服务本身以 root 运行，
+root 不受属主限制；而 `hand_over` 失败会中止**整条密钥启动流程**——这正是上游
+issue #55 的故障形态，为一个没人需要的节点加这个风险不划算。
+
+## 五、验证到什么程度
 
 已经跑过、可以复现的：
 
@@ -129,7 +150,7 @@ Unix 专有接口，这与本次改动无关。CI 的 `ubuntu-24.04` 上会跑�
 这些都需要一台已解锁的 xuanyuan 配合原厂 OS4.0.4.0 底包，本环境做不到。
 所以本分支**不宣称**“已完全适配”，只提供可编译、单元测试通过、且失败会安全中止的实现。
 
-## 五、明确没有做的部分
+## 六、明确没有做的部分
 
 1. **recovery 内应用/合并压缩快照（VABC）**
    原厂 recovery 版 `update_engine_sideload` 在 recovery 中直接把
@@ -151,7 +172,7 @@ Unix 专有接口，这与本次改动无关。CI 的 `ubuntu-24.04` 上会跑�
 
 3. **真机回归**：见下。
 
-## 六、构建
+## 七、构建
 
 与上游一致，用 Linux 或 WSL（Windows 上 `cargo ndk` 需要 NDK + 可用的 host 链接器）：
 
@@ -178,7 +199,7 @@ target/release/skyward-pack recovery \
 
 `.github/workflows/build-xuanyuan.yml` 已经按这套流程构建并校验原厂 recovery 的 SHA-256。
 
-## 七、真机验证清单
+## 八、真机验证清单
 
 按顺序做，每一步失败就停在那里，不要继续：
 

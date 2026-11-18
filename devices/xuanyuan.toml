@@ -22,14 +22,12 @@ sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
 # layer, the one touch driver the phone's own modules.load lists.
 load = ["synaptics_tcm2", "stm_st54se_gpio", "stm_nfc_i2c"]
 
-# The ST54L driver creates this node asynchronously after finit_module.
-# OS4's secure-element service runs as system and opens it; keep its normal
-# permissions so weaver-bound FBE protectors remain available.
-[[owners]]
-user = "system"
-group = "system"
-mode = 0o660
-paths = ["/dev/st54spi_gpio"]
+# The secure element's node is left as its driver makes it: root's. The
+# element's service runs as root, as the configuration below starts it, and
+# root opens a node however it is owned. An [[owners]] entry here would add a
+# wait for a node nothing else needs, and a hand-over that fails stops the
+# whole key start: the data partition then stays closed over a file that was
+# never in the way.
 
 # As on the 17 Ultra, no init script of the phone's starts touch_report:
 # the touch feature service turns the controller's raw frames into
