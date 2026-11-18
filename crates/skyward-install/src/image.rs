@@ -339,8 +339,13 @@ fn flash_as<R: Read + Seek + Send>(
     }
     if let Some(expanded) = crate::sparse::expanded_size(image, len).context("check the sparse image")? {
         ensure!(expanded <= size, "the sparse image expands to {expanded} bytes, more than the {size} its partition holds");
-        for (path, f, _) in &mut outs {
-            crate::sparse::flash(image, len, f, progress)?;
+        // Both slots are one write as far as the page is concerned: the count
+        // goes on where the last slot left it, rather than starting again.
+        let slots = outs.len() as u64;
+        for (index, (path, f, _)) in outs.iter_mut().enumerate() {
+            let base = index as u64 * expanded;
+            let mut meant = |done: u64, _of: u64| progress(base + done, expanded * slots);
+            crate::sparse::flash(image, len, f, &mut meant)?;
             f.sync_all().with_context(|| format!("flush {}", path.display()))?;
         }
         return Ok(());
@@ -766,6 +771,21 @@ mod tests {
         let got = std::fs::read(&path).unwrap();
         assert_eq!(&got[..4096], &image[..], "the image is where it was written");
         assert!(got[4096..].iter().all(|&b| b == 0xaa), "and its end was not moved to the partition's");
+    }
+
+    #[test]
+    fn a_sparse_image_written_into_both_slots_counts_to_the_end_of_the_second() {
+        let dir = tempfile::tempdir().unwrap();
+        let slots = [partition(dir.path(), "system_a", 1 << 20), partition(dir.path(), "system_b", 1 << 20)];
+        let data = vec![0x33u8; 12 * 1024];
+        let image = sparse_of(&data);
+        let mut seen: Vec<(u64, u64)> = Vec::new();
+        flash_logical(&mut Cursor::new(&image), image.len() as u64, &slots, &mut |done, of| seen.push((done, of))).unwrap();
+        let expanded = data.len() as u64;
+        assert!(!seen.is_empty(), "the count is reported at all");
+        assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0), "the second slot goes on from the first: {seen:?}");
+        assert!(seen.iter().all(|(_, of)| *of == 2 * expanded), "against what both slots take: {seen:?}");
+        assert_eq!(seen.last().copied(), Some((2 * expanded, 2 * expanded)), "and it ends when the second is written");
     }
 
     #[test]

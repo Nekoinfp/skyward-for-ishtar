@@ -192,15 +192,25 @@ pub fn flash<R: Read + Seek + Send, W: Write + Seek>(input: &mut R, file_size: u
                 if position > expanded { break 'chunks; }
             }
         });
-        let mut done = 0;
+        // How far into the expanded image the write has come. A don't-care
+        // range is part of that image — a hole the phone keeps, not a gap in
+        // the work — so the count moves over it too and ends at the length the
+        // image expands to, rather than at the bytes actually written. An
+        // image with a hole in it would otherwise report a bar that stops
+        // short of the end and then finishes.
+        let mut at = 0u64;
         let result = (|| -> Result<()> {
             while let Ok(item) = full_rx.recv() {
                 let mut item = item?;
-                if let Some(to) = item.skip { out.seek(SeekFrom::Start(to)).context("seek past sparse don't-care range")?; }
+                if let Some(to) = item.skip {
+                    out.seek(SeekFrom::Start(to)).context("seek past sparse don't-care range")?;
+                    at = to;
+                    progress(at, expanded);
+                }
                 if !item.bytes.is_empty() {
                     out.write_all(&item.bytes).context("write sparse output")?;
-                    done += item.bytes.len() as u64;
-                    progress(done, expanded);
+                    at += item.bytes.len() as u64;
+                    progress(at, expanded);
                 }
                 if let Some((want, got)) = item.crc {
                     ensure!(want == got, "sparse CRC32 mismatch: expanded image has {got:08x}, not {want:08x}");
@@ -420,6 +430,23 @@ mod tests {
             flash(&mut input, bytes.len() as u64, &mut out, &mut |_, _| {}).unwrap_or_else(|e| panic!("round {round}: {e:#}"));
             assert!(out.get_ref() == &expected, "round {round} did not expand as its chunks say");
         }
+    }
+
+    #[test]
+    fn the_count_of_what_is_written_moves_over_the_holes_as_well() {
+        // A block of data, two the phone keeps, and a block of data again.
+        let block = 4096u32;
+        let (first, last) = (vec![0x11u8; block as usize], vec![0x22u8; block as usize]);
+        let none: &[u8] = &[];
+        let bytes = image(block, &[(RAW, 1, &first), (DONT_CARE, 2, none), (RAW, 1, &last)], None);
+        let mut out = Cursor::new(vec![0xaa; 4 * block as usize]);
+        let mut seen: Vec<(u64, u64)> = Vec::new();
+        flash(&mut Cursor::new(&bytes), bytes.len() as u64, &mut out, &mut |done, of| seen.push((done, of))).unwrap();
+        let expanded = 4 * u64::from(block);
+        assert!(!seen.is_empty(), "the count is reported at all");
+        assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0), "and only goes forward: {seen:?}");
+        assert!(seen.iter().all(|(_, of)| *of == expanded), "against the whole expansion: {seen:?}");
+        assert_eq!(seen.last().copied(), Some((expanded, expanded)), "and ends at the end, not at the bytes written");
     }
 
     #[test]
