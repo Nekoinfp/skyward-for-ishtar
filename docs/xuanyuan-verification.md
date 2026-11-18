@@ -77,6 +77,31 @@
 3. **整张 fstab 解析无误**：62 行非注释条目 → 62 条解析结果，`/data` 两行
    （f2fs 与 mifs）字段全对。真机那两行已作为回归用例。
 
+**自己复现这套核对**（需要 root 或能 loop 挂载）：
+
+```
+skyward-pack stock --config devices/xuanyuan.toml --out stock/recovery.img --partition vendor
+skyward-pack stock --config devices/xuanyuan.toml --out stock/recovery.img --partition odm
+sudo mount -o loop,ro stock/vendor.img /mnt/vendor
+sudo mount -o loop,ro stock/odm.img /mnt/odm
+cargo run --release -p skyward-pack -- paths --config devices/xuanyuan.toml \
+    --vendor /mnt/vendor --odm /mnt/odm
+```
+
+输出（实测）：
+
+```
+  there        /vendor/bin/hw/android.hardware.security.keymint-service-qti
+  ...
+  there        /odm/bin/hw/android.hardware.weaver-service.thales
+
+15 paths checked against the partitions given, 0 missing, 0 not checked
+```
+
+`paths` 只核 `/vendor` 与 `/odm`：`/system` 下的路径是打包时塞进 ramdisk 的
+（`se_omapi`、recovery 自己的 `lib64`），不在手机的这两个分区里，命令会把它们单列出来。
+某个分区没给全时命令**直接失败**并说明该加哪个 `--`，不让"只查了一半"冒充通过。
+
 ---
 
 ## 四、尚未验证的部分

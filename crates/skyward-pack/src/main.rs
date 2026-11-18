@@ -119,7 +119,25 @@ enum Cmd {
         #[arg(long, requires = "out")]
         partition: Option<String>,
     },
-
+    /// Hold a device configuration against the partitions a phone ships: every
+    /// program, library folder and firmware file it names under /vendor or
+    /// /odm has to be in the tree it is taken from. The trees are partitions
+    /// taken out of the phone's package and mounted, so that a configuration
+    /// can be checked against a build before anything is flashed.
+    ///
+    /// Paths under /system are not checked: they are the recovery's own, put
+    /// there by the packing rather than taken from the phone.
+    Paths {
+        /// The device configuration, devices/<codename>.toml.
+        #[arg(long)]
+        config: PathBuf,
+        /// A mounted or unpacked vendor partition.
+        #[arg(long)]
+        vendor: Option<PathBuf>,
+        /// A mounted or unpacked odm partition.
+        #[arg(long)]
+        odm: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -239,7 +257,92 @@ fn main() -> Result<()> {
                 (None, _) => Ok(()),
             }
         }
+        Cmd::Paths { config, vendor, odm } => {
+            let trees = [("vendor", vendor), ("odm", odm)];
+            check_paths(&config, &trees)
+        }
     }
+}
+
+/// The parts of a phone a path in a configuration can be taken from. What the
+/// recovery carries itself is not one of them: a path under `/system` is put
+/// there by the packing, not by the phone.
+const TREES: [&str; 2] = ["vendor", "odm"];
+
+/// Every program, library folder and firmware file the configuration names,
+/// held against the trees given for them: the partitions it takes them from,
+/// mounted from the phone's own package.
+///
+/// A path whose tree was not given is said to be not checked rather than
+/// passed over, since a half-checked configuration is not a checked one.
+fn check_paths(config: &Path, trees: &[(&str, Option<PathBuf>)]) -> Result<()> {
+    let cfg = skyward_config::DeviceConfig::load(config)?;
+    let mut named: Vec<(&str, &str)> = Vec::new();
+    let (mut looked, mut missing) = (0, 0);
+    for service in &cfg.services {
+        named.push((&service.path, "program"));
+        for library in &service.libraries {
+            named.push((library, "library folder"));
+        }
+    }
+    if let Some(wlan) = &cfg.wlan {
+        named.push((&wlan.supplicant, "program"));
+        for file in &wlan.firmware {
+            if file.path.starts_with('/') {
+                named.push((&file.path, "firmware"));
+            }
+        }
+    }
+    if let Some(haptics) = &cfg.haptics {
+        for file in &haptics.firmware {
+            if file.path.starts_with('/') {
+                named.push((&file.path, "firmware"));
+            }
+        }
+    }
+    let mut ours: Vec<&str> = Vec::new();
+    let mut unchecked: Vec<&str> = Vec::new();
+    let mut seen: Vec<&str> = Vec::new();
+    for (path, kind) in named {
+        // Several programs share a library folder; it is looked for once.
+        if seen.contains(&path) {
+            continue;
+        }
+        seen.push(path);
+        let Some((tree, rest)) = TREES.iter().find_map(|tree| path.strip_prefix(&format!("/{tree}/")).map(|rest| (*tree, rest))) else {
+            if path.starts_with("/system/") {
+                ours.push(path);
+            }
+            continue;
+        };
+        let Some(dir) = trees.iter().find(|(name, _)| *name == tree).and_then(|(_, dir)| dir.as_ref()) else {
+            println!("  not checked  {path}  (no {tree} partition given)");
+            unchecked.push(path);
+            continue;
+        };
+        looked += 1;
+        if dir.join(rest).exists() {
+            println!("  there        {path}");
+        } else {
+            println!("  MISSING      {path}  ({kind})");
+            missing += 1;
+        }
+    }
+    if !ours.is_empty() {
+        println!("\nthe recovery's own, which the packing puts there:");
+        for path in ours {
+            println!("  {path}");
+        }
+    }
+    println!("\n{looked} paths checked against the partitions given, {missing} missing, {} not checked", unchecked.len());
+    ensure!(
+        unchecked.is_empty(),
+        "{} paths are in partitions that were not given, so the configuration is only half checked: give {}",
+        unchecked.len(),
+        trees.iter().filter(|(_, dir)| dir.is_none()).map(|(name, _)| format!("--{name}")).collect::<Vec<_>>().join(" and ")
+    );
+    ensure!(missing == 0, "{missing} of the paths {} names are in none of the partitions given", config.display());
+    Ok(())
 }
 
 /// The partition a recovery is made on, as a full update package names it.
@@ -527,5 +630,86 @@ ro.build.version.security_patch=2026-10-01\nro.vendor.build.security_patch=2026-
         for bad in ["", "recovery", "../recovery", "odm/../../../etc/passwd", "odm.img", "odm ", "ODM\n", "分区"] {
             assert!(separate_partition(bad).is_err(), "{bad:?} is not a partition name");
         }
+    }
+
+    /// A configuration naming one program in each of the three trees, and a
+    /// firmware file and a library folder beside them.
+    const PATHS_CONFIG: &str = "\
+[device]
+codename = \"x\"
+
+[[service]]
+path = \"/vendor/bin/hw/keymint\"
+libraries = [\"/system/lib64\", \"/vendor/lib64\"]
+
+[[service]]
+path = \"/odm/bin/hw/weaver\"
+libraries = [\"/odm/lib64\"]
+
+[wlan]
+modules = [\"rfkill\"]
+interface = \"wlan0\"
+supplicant = \"/vendor/bin/hw/wpa_supplicant\"
+service = \"android.hardware.wifi.supplicant.ISupplicant/default\"
+probe = \"http://connect.rom.miui.com/generate_204\"
+firmware = [{ name = \"peach/WCNSS_qcom_cfg.ini\", path = \"/vendor/etc/wifi/peach/WCNSS_qcom_cfg.ini\" }]
+";
+
+    /// A tree holding every `paths` file, made as the partition would be.
+    fn tree(root: &Path, paths: &[&str]) -> PathBuf {
+        for path in paths {
+            let at = root.join(path);
+            std::fs::create_dir_all(at.parent().expect("a parent")).unwrap();
+            std::fs::write(&at, b"x").unwrap();
+        }
+        root.to_path_buf()
+    }
+
+    fn config_at(dir: &Path) -> PathBuf {
+        let at = dir.join("device.toml");
+        std::fs::write(&at, PATHS_CONFIG).unwrap();
+        at
+    }
+
+    #[test]
+    fn every_path_a_configuration_names_is_looked_for_in_its_own_partition() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config_at(dir.path());
+        let vendor = tree(&dir.path().join("vendor"), &[
+            "bin/hw/keymint",
+            "bin/hw/wpa_supplicant",
+            "etc/wifi/peach/WCNSS_qcom_cfg.ini",
+        ]);
+        std::fs::create_dir_all(vendor.join("lib64")).unwrap();
+        let odm = tree(&dir.path().join("odm"), &["bin/hw/weaver"]);
+        std::fs::create_dir_all(odm.join("lib64")).unwrap();
+        let trees = [("vendor", Some(vendor)), ("odm", Some(odm))];
+        check_paths(&config, &trees).expect("every path is there");
+    }
+
+    #[test]
+    fn a_program_that_is_not_in_its_partition_fails_the_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config_at(dir.path());
+        let vendor = tree(&dir.path().join("vendor"), &["bin/hw/keymint"]);
+        std::fs::create_dir_all(vendor.join("lib64")).unwrap();
+        let odm = tree(&dir.path().join("odm"), &["bin/hw/weaver"]);
+        std::fs::create_dir_all(odm.join("lib64")).unwrap();
+        let trees = [("vendor", Some(vendor)), ("odm", Some(odm))];
+        // The wpa_supplicant, the firmware file and the system's own library
+        // folder are missing, and no system partition was given.
+        let error = check_paths(&config, &trees).unwrap_err().to_string();
+        assert!(error.contains("are in none of the partitions given"), "{error}");
+    }
+
+    #[test]
+    fn a_path_whose_partition_was_not_given_is_not_counted_as_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config_at(dir.path());
+        let vendor = tree(&dir.path().join("vendor"), &["bin/hw/keymint"]);
+        std::fs::create_dir_all(vendor.join("lib64")).unwrap();
+        let trees = [("vendor", Some(vendor)), ("odm", None)];
+        let error = check_paths(&config, &trees).unwrap_err().to_string();
+        assert!(error.contains("only half checked") && error.contains("--odm"), "the weaver's partition was not given, so the check cannot pass: {error}");
     }
 }
