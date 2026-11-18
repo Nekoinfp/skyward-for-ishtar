@@ -218,7 +218,15 @@ fn main() -> Result<()> {
                 println!("{key}={value}");
             }
             if !stock_props.iter().any(|(key, _, _)| key.ends_with(".security_patch")) {
-                eprintln!("warning: {} names no security patch in its footer; the data partition may not open", stock.display());
+                // Both of this phone's stock recoveries — the one OS4.0.0.18
+                // ships and the one OS4.0.4.0 ships — put nothing in their
+                // footer but a fingerprint, so this is how the phone is built
+                // rather than something the package lost. The recovery sets
+                // those properties from the installed system as it starts.
+                eprintln!(
+                    "note: {} names no security patch in its footer, as this phone's stock recoveries do not either; the recovery reads it from the installed system",
+                    stock.display()
+                );
             }
             let props: Vec<u8> = stock_props.into_iter().flat_map(|(_, _, d)| d).collect();
             write(&out, &img, &avb::footed(&bytes, "recovery", size, &Sha256::digest(&bytes), &props)?)

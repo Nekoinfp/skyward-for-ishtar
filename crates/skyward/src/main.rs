@@ -449,8 +449,125 @@ fn booted_slot() -> Result<skyward_vab::Slot> {
 }
 
 /// The lines of a service's own error output that are kept, from its end.
-#[cfg(target_os = "android")]
 const SAID_LINES: usize = 12;
+
+/// Everything [`report`] prints, gathered by the caller.
+///
+/// It is a plain value so that the words can be tried on a computer: the
+/// gathering needs a phone, the report does not.
+#[derive(Debug, Default)]
+struct Gathered {
+    codename: String,
+    /// The build the image was packed on, and the first of its recovery sum.
+    packed_on: Option<(String, String)>,
+    slot: Option<char>,
+    /// The installed system's incremental, release and patch level.
+    installed: Option<(String, String, String)>,
+    /// Each table the phone keeps, and whether it is there.
+    tables: Vec<(&'static str, bool)>,
+    data: Option<skyward_block::fstab::Entry>,
+    /// Whether the table was read but said nothing about /data.
+    said_nothing_about_data: bool,
+    data_error: Option<String>,
+    key_dir: Option<String>,
+    /// The files in the key's directory: their names and sizes, never what
+    /// they hold.
+    key_files: Option<Vec<(String, u64)>>,
+    key_error: Option<String>,
+    read_through: Option<String>,
+    device_error: Option<String>,
+    /// Each service of the key chain, and whether it has registered.
+    services: Vec<(String, bool)>,
+    update: Option<String>,
+    update_error: Option<String>,
+    /// Each kept error output, with the lines the report shows.
+    logs: Vec<(String, Vec<String>)>,
+}
+
+/// The report, as the words a person reads and pastes back.
+fn report(g: &Gathered) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("skyward {} for {}\n", skyward_info::VERSION, g.codename));
+    if let Some((version, sum)) = &g.packed_on {
+        out.push_str(&format!("packed on {version}, from the recovery partition {sum}…\n"));
+    }
+    out.push_str(&format!(
+        "running from slot {}\n",
+        g.slot.map_or("unknown".to_string(), |s| s.to_string())
+    ));
+    match &g.installed {
+        Some((incremental, release, patch)) => {
+            out.push_str(&format!("installed system {incremental} (Android {release}, patch {patch})\n"));
+        }
+        None => out.push_str("installed system: its build properties could not be read\n"),
+    }
+
+    out.push_str("\nthe phone's own table\n");
+    for (file, there) in &g.tables {
+        out.push_str(&format!("  {file}: {}\n", if *there { "there" } else { "not there" }));
+    }
+    match (&g.data, g.said_nothing_about_data, &g.data_error) {
+        (Some(entry), _, _) => {
+            out.push_str("  /data\n");
+            out.push_str(&format!("    device: {}\n", entry.device));
+            out.push_str(&format!("    filesystem: {}\n", entry.filesystem));
+            for name in ["metadata_encryption", "keydirectory", "fileencryption"] {
+                out.push_str(&format!("    {name}: {}\n", entry.extra(name).unwrap_or("(none)")));
+            }
+            // Without this the partition cannot be mapped at all, and the
+            // reason names it, so it is worth saying which it is.
+            if entry.extra("metadata_encryption").is_none() {
+                out.push_str("    note: no metadata_encryption, so this table says the partition is not encrypted whole\n");
+            }
+            match (&g.key_dir, &g.key_files, &g.key_error) {
+                (Some(dir), Some(files), _) => {
+                    let mut named: Vec<String> = files.iter().map(|(name, len)| format!("{name} ({len} bytes)")).collect();
+                    named.sort();
+                    let said = if named.is_empty() { "empty".to_string() } else { named.join(", ") };
+                    out.push_str(&format!("  the key it keeps: {dir}: {said}\n"));
+                }
+                (Some(dir), None, Some(error)) => out.push_str(&format!("  the key it keeps: {dir} ({error})\n")),
+                (_, _, Some(error)) => out.push_str(&format!("  the key it keeps: ({error})\n")),
+                _ => out.push_str("  the key it keeps: (not looked at)\n"),
+            }
+            match (&g.read_through, &g.device_error) {
+                (Some(device), _) => out.push_str(&format!("  /data is read through: {device}\n")),
+                (None, Some(error)) => out.push_str(&format!("  /data is read through: ({error})\n")),
+                _ => {}
+            }
+        }
+        (None, true, _) => out.push_str("  it says nothing about /data\n"),
+        (None, false, Some(error)) => out.push_str(&format!("  it could not be read: {error}\n")),
+        (None, false, None) => out.push_str("  (the table was not read)\n"),
+    }
+
+    out.push_str("\nthe services the key chain needs\n");
+    if g.services.is_empty() {
+        out.push_str("  (the configuration names none)\n");
+    }
+    for (name, registered) in &g.services {
+        let state = if *registered { "registered" } else { "NOT registered" };
+        out.push_str(&format!("  {state}: {name}\n"));
+    }
+
+    out.push('\n');
+    match (&g.update, &g.update_error) {
+        (Some(state), _) => out.push_str(&format!("an update in flight: {state}\n")),
+        (None, Some(error)) => out.push_str(&format!("an update in flight: ({error})\n")),
+        _ => {}
+    }
+
+    if !g.logs.is_empty() {
+        out.push_str("\nwhat the services said\n");
+        for (path, lines) in &g.logs {
+            out.push_str(&format!("  {path} ({} lines)\n", lines.len()));
+            for line in lines {
+                out.push_str(&format!("    | {line}\n"));
+            }
+        }
+    }
+    out
+}
 
 /// Say what opening the data partition needs, and whether each part is in
 /// place.
@@ -462,124 +579,219 @@ const SAID_LINES: usize = 12;
 #[cfg(target_os = "android")]
 fn check(config: &Path) -> Result<()> {
     let cfg = DeviceConfig::load(config)?;
-    println!("skyward {} for {}", skyward_info::VERSION, cfg.device.codename);
+    let mut g = Gathered {
+        codename: cfg.device.codename.clone(),
+        ..Gathered::default()
+    };
     if let Some(stock) = &cfg.stock {
-        let sum = stock.recovery.get(..16).unwrap_or(&stock.recovery);
-        println!("packed on {}, from the recovery partition {sum}…", stock.version);
+        let sum = stock.recovery.get(..16).unwrap_or(&stock.recovery).to_string();
+        g.packed_on = Some((stock.version.clone(), sum));
     }
     let slot = skyward_vab::current_slot().ok().flatten();
-    println!("running from slot {}", slot.map_or("unknown".to_string(), |s| s.letter().to_string()));
-    match slot.map(skyward_info::installed_props).transpose() {
-        Ok(Some(props)) => {
+    g.slot = slot.map(|s| s.letter().chars().next().unwrap_or('?'));
+    g.installed = slot
+        .map(skyward_info::installed_props)
+        .transpose()
+        .ok()
+        .flatten()
+        .map(|props| {
             let said = |name: &str| props.get(name).map_or("(unset)", String::as_str).to_string();
-            println!(
-                "installed system {} (Android {}, patch {})",
+            (
                 said("ro.build.version.incremental"),
                 said("ro.build.version.release"),
-                said("ro.build.version.security_patch")
-            );
-        }
-        _ => println!("installed system: its build properties could not be read"),
-    }
-
-    println!();
-    println!("the phone's own table");
-    for file in skyward_block::fstab::FILES {
-        println!("  {file}: {}", if Path::new(file).exists() { "there" } else { "not there" });
-    }
+                said("ro.build.version.security_patch"),
+            )
+        });
+    g.tables = skyward_block::fstab::FILES.iter().map(|file| (*file, Path::new(file).exists())).collect();
     match skyward_block::fstab::read("/data") {
-        Ok(entries) if entries.is_empty() => println!("  it says nothing about /data"),
+        Ok(entries) if entries.is_empty() => g.said_nothing_about_data = true,
         Ok(entries) => {
-            let entry = &entries[0];
-            println!("  /data");
-            println!("    device               {}", entry.device);
-            println!("    filesystem           {}", entry.filesystem);
-            for name in ["metadata_encryption", "keydirectory", "fileencryption"] {
-                println!("    {name:<20} {}", entry.extra(name).unwrap_or("(none)"));
-            }
-            // Without this the partition cannot be mapped at all, and the
-            // reason names it, so it is worth saying which it is.
-            if entry.extra("metadata_encryption").is_none() {
-                println!("    note: no metadata_encryption, so this table says the partition is not encrypted whole");
-            }
-            // The directory Android keeps the wrapped key in. Its files are
-            // named and measured, never read: what they hold is the key.
-            match skyward_crypto::data::key_dir(entry) {
-                Ok(dir) => match std::fs::read_dir(&dir) {
-                    Ok(entries) => {
-                        let mut kept: Vec<String> = entries
-                            .flatten()
-                            .map(|e| {
-                                let name = e.file_name().to_string_lossy().into_owned();
-                                let len = e.metadata().map(|m| m.len()).unwrap_or(0);
-                                format!("{name} ({len} bytes)")
-                            })
-                            .collect();
-                        kept.sort();
-                        let said = if kept.is_empty() { "empty".to_string() } else { kept.join(", ") };
-                        println!("  the key it keeps     {}: {said}", dir.display());
+            let entry = entries.into_iter().next().expect("an entry");
+            match skyward_crypto::data::key_dir(&entry) {
+                Ok(dir) => {
+                    g.key_dir = Some(dir.display().to_string());
+                    match std::fs::read_dir(&dir) {
+                        Ok(files) => {
+                            g.key_files = Some(
+                                files
+                                    .flatten()
+                                    .map(|e| {
+                                        let name = e.file_name().to_string_lossy().into_owned();
+                                        (name, e.metadata().map(|m| m.len()).unwrap_or(0))
+                                    })
+                                    .collect(),
+                            );
+                        }
+                        Err(e) => g.key_error = Some(e.to_string()),
                     }
-                    Err(e) => println!("  the key it keeps     {} ({e})", dir.display()),
-                },
-                Err(e) => println!("  the key it keeps     ({e:#})"),
+                }
+                Err(e) => g.key_error = Some(format!("{e:#}")),
             }
-            match skyward_block::fstab::device(entry) {
-                Ok(device) => println!("  /data is read through {device}"),
-                Err(e) => println!("  /data is read through ({e:#})"),
+            match skyward_block::fstab::device(&entry) {
+                Ok(device) => g.read_through = Some(device),
+                Err(e) => g.device_error = Some(format!("{e:#}")),
             }
+            g.data = Some(entry);
         }
-        Err(e) => println!("  it could not be read: {e:#}"),
+        Err(e) => g.data_error = Some(format!("{e:#}")),
     }
-
-    println!();
-    println!("the services the key chain needs");
-    let mut any = false;
-    for s in &cfg.services {
-        if let Some(name) = &s.ready_service {
-            any = true;
-            let state = match services::registered(name) {
-                true => "registered",
-                false => "NOT registered",
-            };
-            println!("  {state:<15} {name}");
-        }
-    }
-    if !any {
-        println!("  (the configuration names none)");
-    }
-
-    println!();
+    g.services = cfg
+        .services
+        .iter()
+        .filter_map(|s| s.ready_service.as_ref().map(|name| (name.clone(), services::registered(name))))
+        .collect();
     match skyward_vab::snapshot_state() {
-        Ok(state) => println!("an update in flight: {state:?}"),
-        Err(e) => println!("an update in flight: ({e:#})"),
+        Ok(state) => g.update = Some(format!("{state:?}")),
+        Err(e) => g.update_error = Some(format!("{e:#}")),
     }
-
-    say_what_the_services_said();
+    g.logs = what_the_services_said();
+    print!("{}", report(&g));
     Ok(())
 }
 
-/// Print the error output each of the phone's own programs has kept, its last
+/// The lines of a kept error output that the report shows: the last
+/// [`SAID_LINES`] of them, the blank ones left out.
+fn kept_lines(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
+    let from = lines.len().saturating_sub(SAID_LINES);
+    lines.into_iter().skip(from).map(str::to_string).collect()
+}
+
+/// The error output each of the phone's own programs has kept, with its last
 /// lines, so that a program that cannot start is read rather than guessed at.
 #[cfg(target_os = "android")]
-fn say_what_the_services_said() {
+fn what_the_services_said() -> Vec<(String, Vec<String>)> {
     let dir = Path::new("/skyward/run/services");
     let mut logs: Vec<PathBuf> = match std::fs::read_dir(dir) {
         Ok(entries) => entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "log")).collect(),
-        Err(_) => Vec::new(),
+        Err(_) => return Vec::new(),
     };
-    if logs.is_empty() {
-        return;
-    }
     logs.sort();
-    println!();
-    println!("what the services said");
-    for log in logs {
-        let Ok(text) = std::fs::read_to_string(&log) else { continue };
-        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-        println!("  {} ({} lines)", log.display(), lines.len());
-        for line in lines.iter().skip(lines.len().saturating_sub(SAID_LINES)) {
-            println!("    | {line}");
+    logs.into_iter()
+        .filter_map(|log| {
+            let text = std::fs::read_to_string(&log).ok()?;
+            Some((log.display().to_string(), kept_lines(&text)))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(line: &str) -> skyward_block::fstab::Entry {
+        skyward_block::fstab::entries(line).into_iter().next().expect("one entry")
+    }
+
+    /// A report of a phone whose table says what OS4's does.
+    fn gathered(line: &str) -> Gathered {
+        Gathered {
+            codename: "xuanyuan".into(),
+            packed_on: Some(("OS4.0.4.0.XOACNXM".into(), "55f491052a360bc1".into())),
+            slot: Some('B'),
+            installed: Some(("OS4.0.4.0.XOACNXM".into(), "15".into(), "2026-10-01".into())),
+            tables: vec![("/vendor/etc/fstab.qcom", true), ("/odm/etc/fstab.qcom", false)],
+            data: Some(entry(line)),
+            key_dir: Some("/metadata/vold/metadata_encryption/key".into()),
+            key_files: Some(vec![("key".into(), 64)]),
+            read_through: Some("/dev/block/by-name/userdata".into()),
+            services: vec![
+                ("android.hardware.security.keymint.IKeyMintDevice/default".into(), true),
+                ("android.hardware.weaver.IWeaver/default".into(), false),
+            ],
+            update: Some("None".into()),
+            logs: vec![(
+                "/skyward/run/services/android.hardware.security.keymint-service-qti.log".into(),
+                vec!["CANNOT LINK EXECUTABLE: library \"libvndksupport.so\" not found".into()],
+            )],
+            ..Gathered::default()
         }
+    }
+
+    const ENCRYPTED: &str = "/dev/block/bootdevice/by-name/userdata /data f2fs noatime,nosuid fileencryption=ice,wrappedkey,keydirectory=/metadata/vold/metadata_encryption,metadata_encryption=aes-256-xts:wrappedkey_v0";
+
+    #[test]
+    fn the_report_names_the_parts_the_data_partition_needs() {
+        let said = report(&gathered(ENCRYPTED));
+        for wanted in [
+            "for xuanyuan",
+            "packed on OS4.0.4.0.XOACNXM, from the recovery partition 55f491052a360bc1…",
+            "running from slot B",
+            "installed system OS4.0.4.0.XOACNXM (Android 15, patch 2026-10-01)",
+            "/vendor/etc/fstab.qcom: there",
+            "/odm/etc/fstab.qcom: not there",
+            "device: /dev/block/bootdevice/by-name/userdata",
+            "filesystem: f2fs",
+            "metadata_encryption: aes-256-xts:wrappedkey_v0",
+            "keydirectory: /metadata/vold/metadata_encryption",
+            "fileencryption: ice",
+            "the key it keeps: /metadata/vold/metadata_encryption/key: key (64 bytes)",
+            "/data is read through: /dev/block/by-name/userdata",
+            "registered: android.hardware.security.keymint.IKeyMintDevice/default",
+            "NOT registered: android.hardware.weaver.IWeaver/default",
+            "an update in flight: None",
+            "| CANNOT LINK EXECUTABLE",
+        ] {
+            assert!(said.contains(wanted), "the report does not say {wanted:?}:\n{said}");
+        }
+        assert!(!said.contains("no metadata_encryption"), "an encrypted partition is not noted as plain");
+    }
+
+    #[test]
+    fn a_table_that_says_the_partition_is_not_encrypted_whole_says_so() {
+        let plain = "/dev/block/bootdevice/by-name/userdata /data f2fs noatime fileencryption=ice,wrappedkey,keydirectory=/metadata/vold/metadata_encryption";
+        let said = report(&gathered(plain));
+        assert!(said.contains("note: no metadata_encryption"), "{said}");
+        assert!(said.contains("metadata_encryption: (none)"), "what it does not say is shown as nothing:\n{said}");
+    }
+
+    #[test]
+    fn a_look_that_cannot_be_made_says_which_one_and_the_rest_still_print() {
+        let mut g = gathered(ENCRYPTED);
+        g.installed = None;
+        g.data = None;
+        g.data_error = Some("read /vendor/etc/fstab.qcom: No such file or directory".into());
+        g.key_dir = None;
+        g.key_files = None;
+        g.key_error = Some("the phone says where the key for its data partition is not".into());
+        g.services.clear();
+        g.update = None;
+        g.update_error = Some("misc: no such file".into());
+        g.logs.clear();
+        let said = report(&g);
+        for wanted in [
+            "installed system: its build properties could not be read",
+            "it could not be read: read /vendor/etc/fstab.qcom",
+            "the key it keeps: (the phone says where the key for its data partition is not)",
+            "(the configuration names none)",
+            "an update in flight: (misc: no such file)",
+            "running from slot B",
+            "packed on OS4.0.4.0.XOACNXM",
+        ] {
+            assert!(said.contains(wanted), "the report does not say {wanted:?}:\n{said}");
+        }
+        assert!(!said.contains("what the services said"), "no log is invented when none was kept");
+    }
+
+    #[test]
+    fn an_empty_key_directory_is_told_apart_from_a_full_one() {
+        let mut g = gathered(ENCRYPTED);
+        g.key_files = Some(Vec::new());
+        assert!(report(&g).contains("metadata_encryption/key: empty"), "{}", report(&g));
+    }
+
+    #[test]
+    fn a_kept_log_gives_its_last_lines_and_leaves_the_blank_ones_out() {
+        let mut text = String::new();
+        for i in 0..SAID_LINES + 5 {
+            text.push_str(&format!("line {i}\n"));
+            text.push('\n');
+        }
+        let kept = kept_lines(&text);
+        assert_eq!(kept.len(), SAID_LINES, "only the last lines are kept");
+        assert_eq!(kept.first().map(String::as_str), Some("line 5"), "and they are the last ones");
+        assert!(kept.iter().all(|line| !line.is_empty()), "blank lines are left out");
+        assert!(kept_lines("short\n").len() == 1, "a short log is kept whole");
     }
 }
 
