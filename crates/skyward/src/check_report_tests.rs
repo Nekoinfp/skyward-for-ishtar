@@ -31,7 +31,9 @@ fn gathered(line: &str) -> Gathered {
     }
 }
 
-const ENCRYPTED: &str = "/dev/block/bootdevice/by-name/userdata /data f2fs noatime,nosuid fileencryption=ice,wrappedkey,keydirectory=/metadata/vold/metadata_encryption,metadata_encryption=aes-256-xts:wrappedkey_v0";
+/// The `/data` line the Chinese system's own `fstab.qcom` carries, taken from
+/// the OS4.0.4.0 package whole.
+const ENCRYPTED: &str = "/dev/block/bootdevice/by-name/userdata /data f2fs noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier,inlinecrypt,gc_merge,compress_mode=user,compress_cache,atgc,age_extent_cache latemount,wait,check,formattable,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0,keydirectory=/metadata/vold/metadata_encryption,metadata_encryption=aes-256-xts:wrappedkey_v0,quota,reservedsize=128M,sysfs_path=/sys/devices/platform/soc/1d84000.ufshc,checkpoint=fs";
 
 #[test]
 fn the_report_names_the_parts_the_data_partition_needs() {
@@ -47,7 +49,7 @@ fn the_report_names_the_parts_the_data_partition_needs() {
         "filesystem: f2fs",
         "metadata_encryption: aes-256-xts:wrappedkey_v0",
         "keydirectory: /metadata/vold/metadata_encryption",
-        "fileencryption: ice",
+        "fileencryption: aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0",
         "the key it keeps: /metadata/vold/metadata_encryption/key: key (64 bytes)",
         "/data is read through: /dev/block/by-name/userdata",
         "registered: android.hardware.security.keymint.IKeyMintDevice/default",
