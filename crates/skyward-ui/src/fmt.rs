@@ -930,6 +930,7 @@ pub fn image_kind(l: Lang, kind: ImageKind) -> (&'static str, &'static str) {
         ImageKind::Dtbo => (["dtbo 镜像", "dtbo 映像檔", "dtbo image"], ["包含设备树叠加层", "包含裝置樹疊加層", "Holds device tree overlays"]),
         ImageKind::Vbmeta => (["vbmeta 镜像", "vbmeta 映像檔", "vbmeta image"], ["包含启动验证数据", "包含啟動驗證資料", "Holds verified boot data"]),
         ImageKind::Super => (["super 镜像", "super 映像檔", "super image"], ["包含动态分区的镜像", "包含動態分割區的映像檔", "Holds the image of the dynamic partitions"]),
+        ImageKind::Logical => (["逻辑分区镜像", "邏輯分割區映像檔", "Logical partition image"], ["包含 erofs、ext4 或 f2fs 文件系统；空间不足时可扩容", "包含 erofs、ext4 或 f2fs 檔案系統；空間不足時可擴容", "An erofs, ext4 or f2fs filesystem; free space in super may be used to grow it"]),
     };
     (l.pick(name), l.pick(holds))
 }

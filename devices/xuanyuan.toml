@@ -22,6 +22,15 @@ sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
 # layer, the one touch driver the phone's own modules.load lists.
 load = ["synaptics_tcm2", "stm_st54se_gpio", "stm_nfc_i2c"]
 
+# The ST54L driver creates this node asynchronously after finit_module.
+# OS4's secure-element service runs as system and opens it; keep its normal
+# permissions so weaver-bound FBE protectors remain available.
+[[owners]]
+user = "system"
+group = "system"
+mode = 0o660
+paths = ["/dev/st54spi_gpio"]
+
 # As on the 17 Ultra, no init script of the phone's starts touch_report:
 # the touch feature service turns the controller's raw frames into
 # touches with /odm/lib64/libtouchreport.so, and a recovery runs none of

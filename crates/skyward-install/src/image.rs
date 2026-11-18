@@ -66,6 +66,11 @@ const WINDOW: u64 = 1 << 20;
 /// a super image went can be read off the phone's own log afterwards.
 const RATE_EVERY: u64 = 1 << 30;
 
+/// The name a logical partition is mapped under for the write alone, as
+/// `skyward_vab::map_whole` is asked for it. An image written through such a
+/// mapping is a filesystem, not a partition of the phone.
+pub const FLASH_MAPPING: &str = "skyward-flash-";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageKind {
     /// A boot image; what it carries decides where it can go.
@@ -73,9 +78,10 @@ pub enum ImageKind {
     VendorBoot,
     Dtbo,
     Vbmeta,
-    /// A raw super image, holding every partition of both slots: it goes to
-    /// the one partition that holds them all, whole.
+    /// A raw or sparse super image, holding every partition of both slots.
     Super,
+    /// An erofs, ext4 or f2fs filesystem for a logical partition in super.
+    Logical,
 }
 
 /// The ramdisk a boot image carries.
@@ -102,6 +108,7 @@ impl ImageKind {
             ImageKind::Dtbo => &["dtbo"],
             ImageKind::Vbmeta => &["vbmeta", "vbmeta_system", "vbmeta_vendor"],
             ImageKind::Super => &["super"],
+            ImageKind::Logical => &[],
         }
     }
 }
@@ -133,7 +140,17 @@ pub fn detect<R: Read + Seek>(file: &mut R, head: &[u8]) -> Result<Option<ImageK
         return Ok(Some(ImageKind::Vbmeta));
     }
     if head.starts_with(SPARSE_MAGIC) {
-        return Ok(None);
+        return Ok(Some(if sparse_super(file)? { ImageKind::Super } else { ImageKind::Logical }));
+    }
+    // A filesystem for one logical partition: erofs and f2fs open their
+    // superblock a kilobyte in, and ext4 keeps its magic inside that one.
+    let mut superblock = [0u8; 58];
+    if file.seek(SeekFrom::Start(1024)).is_ok() && file.read_exact(&mut superblock).is_ok() {
+        let first = u32::from_le_bytes(superblock[..4].try_into().expect("four bytes"));
+        let ext = u16::from_le_bytes(superblock[56..58].try_into().expect("two bytes")) == 0x53ef;
+        if first == 0xe0e1_a2e1 || first == 0xf2f5_2010 || ext {
+            return Ok(Some(ImageKind::Logical));
+        }
     }
     // A super image's geometry opens past the page it keeps clear, so it is
     // past what `head` holds and is read where it is.
@@ -146,6 +163,49 @@ pub fn detect<R: Read + Seek>(file: &mut R, head: &[u8]) -> Result<Option<ImageK
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
         Err(e) => Err(e).context("read where a super image's geometry opens"),
     }
+}
+
+fn sparse_super<R: Read + Seek>(file: &mut R) -> Result<bool> {
+    let file_size = file.seek(SeekFrom::End(0))?;
+    let head = file.seek(SeekFrom::Start(0)).and_then(|_| {
+        let mut h = [0u8; 28];
+        file.read_exact(&mut h).map(|_| h)
+    })?;
+    let block = u64::from(u32::from_le_bytes(head[12..16].try_into().unwrap()));
+    ensure!(block.is_multiple_of(4) && block != 0, "invalid sparse block size");
+    let mut file_at = u64::from(u16::from_le_bytes(head[8..10].try_into().unwrap()));
+    let chunk_header = u64::from(u16::from_le_bytes(head[10..12].try_into().unwrap()));
+    let mut out_at = 0u64;
+    for _ in 0..u32::from_le_bytes(head[20..24].try_into().unwrap()) {
+        file.seek(SeekFrom::Start(file_at))?;
+        let mut h = [0u8; 12];
+        file.read_exact(&mut h)?;
+        let kind = u16::from_le_bytes(h[..2].try_into().unwrap());
+        let out = block.checked_mul(u64::from(u32::from_le_bytes(h[4..8].try_into().unwrap()))).context("sparse chunk size overflow")?;
+        let payload = u64::from(u32::from_le_bytes(h[8..12].try_into().unwrap())).checked_sub(chunk_header).context("short sparse chunk")?;
+        ensure!(file_at + chunk_header + payload <= file_size, "truncated sparse chunk");
+        if kind != 0xcac4 && out_at <= SUPER_GEOMETRY_AT && SUPER_GEOMETRY_AT + 4 <= out_at + out {
+            let offset = SUPER_GEOMETRY_AT - out_at;
+            let mut bytes = [0; 4];
+            match kind {
+                0xcac1 => {
+                    file.seek(SeekFrom::Start(file_at + chunk_header + offset))?;
+                    file.read_exact(&mut bytes)?;
+                }
+                0xcac2 => {
+                    let mut pattern = [0; 4];
+                    file.seek(SeekFrom::Start(file_at + chunk_header))?;
+                    file.read_exact(&mut pattern)?;
+                    for (i, byte) in bytes.iter_mut().enumerate() { *byte = pattern[(offset as usize + i) % 4]; }
+                }
+                _ => return Ok(false),
+            }
+            return Ok(bytes == SUPER_GEOMETRY_MAGIC);
+        }
+        out_at += out;
+        file_at += chunk_header + payload;
+    }
+    Ok(false)
 }
 
 /// Whether a packed ramdisk is a recovery's, by the names in its archive.
@@ -236,11 +296,11 @@ pub fn super_device(dir: &Path) -> PathBuf {
 /// The partitions `kind` fits that this phone has, among the links in `dir`,
 /// the likeliest first: a super image's is the one node that holds both
 /// slots, and the others' are in both slots.
-pub fn partitions(kind: ImageKind, dir: &Path) -> Result<Vec<&'static str>> {
+pub fn partitions(kind: ImageKind, dir: &Path) -> Result<Vec<String>> {
     let mut found = Vec::new();
     for name in kind.partitions() {
         if has_partition(kind, dir, name)? {
-            found.push(*name);
+            found.push((*name).to_string());
         }
     }
     Ok(found)
@@ -267,7 +327,7 @@ fn has_partition(kind: ImageKind, dir: &Path, name: &str) -> Result<bool> {
 /// long one. A signed image smaller than its partition gets its footer moved
 /// to the partition's end, with zeros between, as fastboot does. `progress`
 /// hears the bytes written and read back so far, of all.
-pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progress: &mut dyn FnMut(u64, u64)) -> Result<()> {
+pub fn flash<R: Read + Seek + Send>(image: &mut R, len: u64, devices: &[PathBuf], progress: &mut dyn FnMut(u64, u64)) -> Result<()> {
     ensure!(!devices.is_empty(), "no partition to write");
     let mut outs = Vec::with_capacity(devices.len());
     for path in devices {
@@ -278,10 +338,25 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
     }
     let size = outs[0].2;
     ensure!(outs.iter().all(|(_, _, s)| *s == size), "the partition differs in size between slots");
+    // A logical partition is written through a mapping this recovery made for
+    // the write alone, named as `flash_logical` names it. Its image is a
+    // filesystem, not a partition: no AVB footer is moved in it, and the
+    // device must not be discarded, since a sparse image leaves untouched
+    // everything its chunks do not reach.
+    let logical = devices.iter().all(|path| path.file_name().is_some_and(|name| name.to_string_lossy().starts_with(FLASH_MAPPING)));
+    if let Some(expanded) = crate::sparse::expanded_size(image, len).context("check the sparse image")? {
+        ensure!(expanded <= size, "the sparse image expands to {expanded} bytes, more than the {size} its partition holds");
+        ensure!(!logical || outs.len() <= 2, "a sparse image goes to one slot at a time");
+        for (path, f, _) in &mut outs {
+            crate::sparse::flash(image, len, f, progress)?;
+            f.sync_all().with_context(|| format!("flush {}", path.display()))?;
+        }
+        return Ok(());
+    }
     ensure!(len <= size, "the image is {len} bytes, more than the {size} its partition holds");
 
     let mut footer = [0u8; FOOTER_LEN as usize];
-    let moved = len >= FOOTER_LEN && len < size && {
+    let moved = !logical && len >= FOOTER_LEN && len < size && {
         image.seek(SeekFrom::Start(len - FOOTER_LEN)).context("seek to the image's end")?;
         image.read_exact(&mut footer).context("read the image's end")?;
         footer.starts_with(FOOTER_MAGIC)
@@ -556,7 +631,7 @@ mod tests {
         assert_eq!(kind_of(bytes.get_ref()).unwrap(), Some(ImageKind::VendorBoot));
         assert_eq!(kind_of(&[0xd7, 0xb7, 0xab, 0x1e, 0, 0, 0, 0x40]).unwrap(), Some(ImageKind::Dtbo));
         assert_eq!(kind_of(b"AVB0\0\0\0\x01").unwrap(), Some(ImageKind::Vbmeta));
-        assert_eq!(kind_of(b"\x3a\xff\x26\xed sparse").unwrap(), None);
+        assert!(kind_of(b"\x3a\xff\x26\xed sparse").is_err());
     }
 
     #[test]
@@ -569,13 +644,14 @@ mod tests {
         let mut moved = vec![0u8; 1 << 16];
         moved[..4].copy_from_slice(&SUPER_GEOMETRY_MAGIC);
         assert_eq!(kind_of(&moved).unwrap(), None, "the geometry where a super image keeps its first page clear");
-        // A sparse image's chunks hold anything at all, the geometry magic
-        // among it, and it is still no super image.
+        // A sparse image is told from its chunks: one whose layout opens with
+        // super's geometry is super, and anything else is a filesystem for one
+        // logical partition.
         let mut sparse = vec![0u8; 1 << 16];
         sparse[..4].copy_from_slice(SPARSE_MAGIC);
         let at = SUPER_GEOMETRY_AT as usize;
         sparse[at..at + 4].copy_from_slice(&SUPER_GEOMETRY_MAGIC);
-        assert_eq!(kind_of(&sparse).unwrap(), None);
+        assert!(kind_of(&sparse).is_err(), "a sparse image with no valid header is refused, not guessed at");
     }
 
     #[test]

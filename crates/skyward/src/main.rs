@@ -594,7 +594,11 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
 /// Give each file the phone's own init hands over as it boots to the
 /// account it names, with the mode it gives, as its chown and chmod lines
 /// do. The files are the ones the modules just loaded made, which the
-/// phone's own programs open as those accounts.
+/// phone's own programs open as those accounts; one not there yet is
+/// waited for.
+#[cfg(target_os = "android")]
+const FILES_MADE: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[cfg(target_os = "android")]
 fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
     use skyward_sys::ueventd;
@@ -605,6 +609,7 @@ fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
     for run in owners {
         let (uid, gid) = (id(&run.user)?, id(&run.group)?);
         for path in &run.paths {
+            wait_for_file(Path::new(path), FILES_MADE).context("wait for a file the modules just loaded make")?;
             std::os::unix::fs::chown(path, Some(uid), Some(gid)).with_context(|| format!("give {path} to {}:{}", run.user, run.group))?;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(run.mode))
                 .with_context(|| format!("give {path} the mode {:o}", run.mode))?;
@@ -612,6 +617,27 @@ fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
         }
     }
     Ok(handed)
+}
+
+/// Wait until `path` is there, for at most `within`.
+///
+/// A driver makes its node while it takes its device up, and ueventd makes
+/// that node once the kernel has told it of the device: either may come after
+/// the load of the module returns. The phone's own init waits the same way
+/// before it hands a file over, so a recovery that did not would fail on the
+/// first start after the kernel changed.
+#[cfg(target_os = "android")]
+fn wait_for_file(path: &Path, within: std::time::Duration) -> Result<()> {
+    let asked = std::time::Instant::now();
+    loop {
+        if path.exists() {
+            return Ok(());
+        }
+        if asked.elapsed() >= within {
+            return Err(anyhow!("{} did not appear within {within:?}", path.display()));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 /// The folder the recovery's own programs load their libraries from.
@@ -800,26 +826,15 @@ fn mount_firmware(partition: &str) -> Result<()> {
     skyward_sys::kmsg(&format!("{partition} is mounted on {}, shown at {}", at.display(), shown.display()))
 }
 
-/// What the phone's own secure services read to tell the secure world which
-/// build is running: the system's version and patch level, the newer name
-/// for the version, and the vendor partition's patch level. A recovery image
-/// carries its own, older build's values; the secure world then sees keys the
+/// Set these to the installed system's values: the version and patch level
+/// the secure world is told the running build has, the newer name for the
+/// version, and the vendor partition's patch level. A recovery image carries
+/// its own, older build's values, and the secure world then sees keys the
 /// installed system made as made under a build it does not know, and refuses
-/// them. The recovery's property files leave these out so that they can be
-/// set here instead.
-#[cfg(target_os = "android")]
-const BUILD_VERSION: [&str; 4] = [
-    "ro.build.version.release",
-    "ro.build.version.release_or_codename",
-    "ro.build.version.security_patch",
-    "ro.vendor.build.security_patch",
-];
-
-/// Set each of [`BUILD_VERSION`] to the installed system's value, read from
-/// the partitions that own the names rather than from the merged set, where
-/// a ported system's other maker's files could have replaced them. An
-/// earlier run of the recovery service may have set one already, and init
-/// sets such a property only once.
+/// them. The values are read from the partitions that own the names rather
+/// than from the merged set, where a ported system's other maker's files could
+/// have replaced them. An earlier run of the recovery service may have set one
+/// already, and init sets such a property only once.
 #[cfg(target_os = "android")]
 fn adopt_installed_version(props: &std::collections::HashMap<String, String>) -> Result<()> {
     let values = skyward_info::keymint_props(props);

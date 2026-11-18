@@ -213,7 +213,7 @@ fn main() -> Result<()> {
         (
             "32-sideload-choosing",
             false,
-            Install::Choosing(Choice { kind: recovery, size: 43_257_856, partitions: vec!["recovery"], partition: 0, pick: Pick::Current }),
+            Install::Choosing(Choice { kind: recovery, size: 43_257_856, partitions: vec!["recovery".to_string()], partition: 0, pick: Pick::Current }),
         ),
         (
             "33-sideload-writing-dark",
@@ -233,14 +233,14 @@ fn main() -> Result<()> {
                 overwriting: false,
             },
         ),
-        ("35-sideload-flashing", false, Install::Flashing { partition: "boot", stage: Some(Stage::Flashing { done: 300, total: 800 }) }),
+        ("35-sideload-flashing", false, Install::Flashing { partition: "boot".to_string(), stage: Some(Stage::Flashing { done: 300, total: 800 }) }),
         ("36-sideload-installed", false, Install::Finished { outcome: Outcome::Installed { slot: Slot::A, wipe: false }, damage: None }),
         ("96-sideload-light-wipes", false, Install::Confirming { version: Some("OS3.0.306.0.WMACNXM".into()), wipe: true }),
         ("18-install-ready", false, Install::Confirming { version: Some("OS3.0.306.0.WMACNXM".into()), wipe: false }),
         (
             "37-sideload-flashed-recovery-dark",
             true,
-            Install::Finished { outcome: Outcome::Flashed { partition: "recovery", slots: vec![Slot::A, Slot::B] }, damage: None },
+            Install::Finished { outcome: Outcome::Flashed { partition: "recovery".to_string(), slots: vec![Slot::A, Slot::B] }, damage: None },
         ),
         (
             "38-sideload-refused",

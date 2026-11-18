@@ -1283,8 +1283,8 @@ fn pick_title(l: Lang, pick: Pick, current: Option<Slot>) -> String {
 /// A raw super image: the one partition `super`, and no slots of its own. The
 /// installer writes the whole partition and ignores the slot picked, so the
 /// page does not offer one.
-fn super_image(partitions: &[&'static str]) -> bool {
-    matches!(partitions, ["super"])
+fn super_image(partitions: &[String]) -> bool {
+    matches!(partitions, [only] if only == "super")
 }
 
 /// Words the installing page says of more than one of its steps.
@@ -1631,7 +1631,7 @@ pub fn installing(cx: &Ctx) -> Frame {
             }
             widgets::footnote(&mut c, t, f, y, l.pick(MORE_COMMANDS))
         }
-        Install::Finished { outcome, damage } => finished(&mut c, cx, top, outcome, *damage, &mut out, &mut rows),
+        Install::Finished { outcome, damage } => finished(&mut c, cx, top, outcome, damage.as_ref(), &mut out, &mut rows),
     };
     // What the system asked for says why, where it said.
     let bottom = match (s.source, &s.asked.reason) {
@@ -1701,7 +1701,7 @@ fn finished(
     cx: &Ctx,
     top: f32,
     outcome: &Outcome,
-    damage: Option<Damage>,
+    damage: Option<&Damage>,
     out: &mut Vec<Hit>,
     rows: &mut Option<Rows>,
 ) -> f32 {
@@ -4862,9 +4862,9 @@ mod tests {
 
     #[test]
     fn only_a_super_image_on_its_own_has_no_slots_to_pick() {
-        assert!(super_image(&["super"]), "the whole of the dynamic partitions, in one partition");
-        assert!(!super_image(&["super", "boot"]), "an image that also names another partition is not that");
-        assert!(!super_image(&["boot"]));
+        assert!(super_image(&["super".to_string()]), "the whole of the dynamic partitions, in one partition");
+        assert!(!super_image(&["super".to_string(), "boot".to_string()]), "an image that also names another partition is not that");
+        assert!(!super_image(&["boot".to_string()]));
         assert!(!super_image(&[]), "an image with nowhere to go asks for nothing, rather than for a slot");
     }
 

@@ -176,7 +176,7 @@ impl Installer {
     }
 
     /// Write the image the installer holds to `partition` in `slots`.
-    pub fn flash(&self, partition: &'static str, slots: Vec<Slot>) {
+    pub fn flash(&self, partition: String, slots: Vec<Slot>) {
         // Only a finished installer stops listening, and then there is
         // nothing left to write.
         let _ = self.commands.send(Command::Flash { partition, slots });
@@ -930,7 +930,12 @@ fn lines(from: impl Read, mut each: impl FnMut(&str) -> io::Result<()>) -> io::R
 
 fn flash_image<S>(ctx: &mut Context, mount: &Mount<S>, kind: ImageKind, size: u64) -> Result<Done> {
     let dir = Path::new(skyward_block::BY_NAME);
-    let partitions = image::partitions(kind, dir)?;
+    let partitions = if kind == ImageKind::Logical {
+        let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
+        skyward_vab::slot_bases(slot)?
+    } else {
+        image::partitions(kind, dir)?
+    };
     if partitions.is_empty() {
         return Ok(Done::Decided(Outcome::Refused(Refusal::NoPartition)));
     }
@@ -957,13 +962,111 @@ fn flash_image<S>(ctx: &mut Context, mount: &Mount<S>, kind: ImageKind, size: u6
         flash_super(ctx, mount, size)?;
         return Ok(Done::Decided(Outcome::Flashed { partition, slots: Vec::new() }));
     }
+    if kind == ImageKind::Logical {
+        return flash_logical(ctx, mount, &partition, &slots, size);
+    }
     ensure!(!slots.is_empty(), "no slot chosen for {partition}");
-    if [skyward_systems::store::BOOT, skyward_systems::store::INIT_BOOT].contains(&partition) {
+    if [skyward_systems::store::BOOT, skyward_systems::store::INIT_BOOT].contains(&partition.as_str()) {
         installed_boot_set()?;
     }
-    let devices: Vec<_> = slots.iter().map(|&slot| image::device(dir, partition, slot)).collect();
+    let devices: Vec<_> = slots.iter().map(|&slot| image::device(dir, &partition, slot)).collect();
     flash_to(ctx, mount, size, &devices)?;
     Ok(Done::Decided(Outcome::Flashed { partition, slots }))
+}
+
+/// The sectors a slot's metadata gives to its partitions that lie on super
+/// itself, by the index of the block device they are on.
+fn linear_extents(md: &skyward_lp::Metadata) -> Vec<(usize, std::ops::Range<u64>)> {
+    let mut found = Vec::new();
+    for part in &md.partitions {
+        for extent in &part.extents {
+            if let skyward_lp::Extent::Linear { device, sector, sectors } = *extent {
+                found.push((device, sector..sector + sectors));
+            }
+        }
+    }
+    found
+}
+
+/// Grow and write a filesystem image into each selected logical partition.
+/// All slot allocations are checked together before metadata is written; no
+/// existing extent or other partition is moved.
+fn flash_logical<S>(ctx: &mut Context, mount: &Mount<S>, base: &str, slots: &[Slot], size: u64) -> Result<Done> {
+    ensure!(!slots.is_empty(), "no slot chosen for {base}");
+    ensure!(slots.windows(2).all(|p| p[0] != p[1]), "a slot was chosen twice");
+    if let Some(refusal) = short_of_charge(ctx.origin)? {
+        return Ok(Done::Decided(Outcome::Refused(refusal)));
+    }
+    let state = skyward_vab::snapshot_state()?;
+    if state != SnapshotState::None {
+        return Ok(Done::Decided(Outcome::Refused(Refusal::Pending(state))));
+    }
+    let mut file = BufReader::with_capacity(1 << 20, File::open(mount.path())?);
+    let expanded = crate::sparse::expanded_size(&mut file, size)?.unwrap_or(size);
+    let needed = expanded.div_ceil(skyward_lp::SECTOR_SIZE) * skyward_lp::SECTOR_SIZE;
+    let super_dev = image::super_device(Path::new(skyward_block::BY_NAME));
+    let mut plans: Vec<(Slot, skyward_lp::Metadata)> = Vec::new();
+    for &slot in slots {
+        let full = format!("{base}{}", slot.suffix());
+        let md = skyward_lp::read(&super_dev, slot.number())?;
+        let current = md.partition(&full).with_context(|| format!("super holds no {full}"))?.bytes();
+        if needed <= current {
+            let _ = kmsg(&format!("install: {full} already holds {current} bytes, no growth needed"));
+            continue;
+        }
+        // Super holds the partitions of both slots, and this slot's metadata
+        // names only its own. The other slot's sectors, and those an earlier
+        // slot in this same operation has already been promised, are kept
+        // clear: growing over either would make one slot's partition the
+        // other's.
+        let mut taken = linear_extents(&skyward_lp::read(&super_dev, slot.other().number())?);
+        for (_, planned) in &plans {
+            taken.extend(linear_extents(planned));
+        }
+        let grown = skyward_lp::grow_avoiding(&md, &full, needed, &taken)
+            .with_context(|| format!("grow {full} to {needed} bytes"))?;
+        let _ = kmsg(&format!("install: {full} holds {current} bytes; {needed} planned, in super's free space"));
+        plans.push((slot, grown));
+    }
+    // Both slots are planned, so neither may have taken what the other did.
+    if plans.len() == 2 {
+        let mut occupied: Vec<(usize, std::ops::Range<u64>)> = Vec::new();
+        for (_, md) in &plans {
+            for (device, range) in linear_extents(md) {
+                ensure!(
+                    !occupied.iter().any(|(d, r)| *d == device && range.start < r.end && r.start < range.end),
+                    "the two slots' growth would use the same sectors"
+                );
+                occupied.push((device, range));
+            }
+        }
+    }
+    detach_once(ctx)?;
+    for &slot in slots {
+        skyward_vab::unmount_partitions(slot).with_context(|| format!("unmount slot {} before growing {base}", slot.letter()))?;
+    }
+    for (slot, md) in &plans {
+        skyward_lp::commit(&super_dev, slot.number(), md).with_context(|| format!("commit the grown metadata of slot {}", slot.letter()))?;
+    }
+    let mut wholes = Vec::new();
+    for &slot in slots {
+        let name = format!("skyward-flash-{base}{}", slot.suffix());
+        match skyward_vab::map_whole(slot, base, &name, false) {
+            Ok(whole) => wholes.push(whole),
+            Err(e) => {
+                for whole in &wholes { let _ = skyward_vab::unmap_whole(whole); }
+                return Err(e);
+            }
+        }
+    }
+    let result = flash_to(ctx, mount, size, &wholes.iter().map(|w| w.device.clone()).collect::<Vec<_>>());
+    let mut cleanup = Ok(());
+    for whole in &wholes {
+        if let Err(e) = skyward_vab::unmap_whole(whole) { cleanup = Err(e); }
+    }
+    result?;
+    cleanup?;
+    Ok(Done::Decided(Outcome::Flashed { partition: base.to_string(), slots: slots.to_vec() }))
 }
 
 /// Write a super image over the whole of super, so that the partitions it
