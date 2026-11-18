@@ -127,6 +127,20 @@
    - `libqtigatekeeper.so` 与 `libEseUtils.so` 确实在 `/vendor/lib64/hw`，
      而 gatekeeper 与 secure_element 两个服务的库路径里都有它。
 
+8. **要补的两个库在已安装系统里确实存在，而且不在同一个目录。** 取出 4.0.4.0 的
+   `system`（977,719,296 字节，925 个 `.so`；recovery 自己的 `/system/lib64` 只有 72 个）：
+
+   | 库 | 在已安装系统里的位置 |
+   | --- | --- |
+   | `libvndksupport.so` | `/system/lib64/libvndksupport.so` |
+   | `libdl_android.so` | `/system/lib64/**bootstrap**/libdl_android.so` |
+
+   注意第二个**只在 `bootstrap` 子目录**里。`provide_system_libraries()`
+   （`crates/skyward/src/secure.rs`）是**逐个库**依次在
+   `/mnt/system/system/lib64` 与 `/mnt/system/system/lib64/bootstrap` 里找的，
+   所以两条都取得到；要是只查 `lib64`，`libdl_android.so` 会漏，
+   keymint 照样起不来。这个目录布局现在有实物依据了。
+
 ## 二、逻辑分区扩容（需要改 super 元数据）
 
 `crates/skyward-lp`：
@@ -320,6 +334,9 @@ VINTF 清单齐全、`prop.default` 末尾是 `ro.secure=0` / `ro.debuggable=1` 
    `GetVirtualAbCompressionFeatureFlag()` 判为 NONE（AOSP 注释就写着
    “Don't attempt VABC in recovery”），增量 payload 还会在 `DeleteSourcePartitions()`
    处直接报错。也就是说：**打开包检查的开关并不能让压缩快照工作**。
+   实测 4.0.4.0 的 `system` 分区里 `system/bin/snapuserd` 与
+   `system/lib64/libsnapshot.so` **都在**，缺的不是手机上的东西，而是 recovery 侧那套
+   （`update_engine_sideload` 在 recovery ramdisk 里，且它自己把 VABC 关掉了）。
    要在 recovery 内做这件事，需要与固件匹配的 `libsnapshot` / `snapuserd.recovery`、
    `dm-user` 设备表与两阶段合并，属于另一次 AOSP 侧的工作量，不是几十行 Rust 能补的。
    因此这里保持**显式拒绝**（`Refusal::Incremental`，以及 `snapshots.rs` 对
