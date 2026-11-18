@@ -194,9 +194,14 @@ pub fn check(update: &Update, phone: &Phone) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// Whether `name` is one of the `|`-separated names in `list`.
+/// Whether `name` is one of the names in `list`.
+///
+/// OTA metadata writes several phones' names separated by commas, and install
+/// scripts written for other recoveries sometimes put a bar between them, so
+/// both are taken for the separator: a package made for this phone among
+/// others is one for this phone.
 fn listed(name: &str, list: &str) -> bool {
-    list.split('|').any(|n| n.trim() == name)
+    list.split([',', '|']).any(|n| n.trim() == name)
 }
 
 #[cfg(test)]
@@ -263,6 +268,23 @@ METADATA_SIZE=1024
         );
         let ours = with(Some("nezha|xuanyuan"));
         assert_eq!(declares_other_device(Cursor::new(ours), "xuanyuan").unwrap(), None);
+        // OTA metadata writes the names apart with commas, and sometimes with
+        // spaces around them.
+        for together in ["nezha,xuanyuan", "xuanyuan,nezha", " nezha , xuanyuan ", "nezha,xuanyuan|xuanyuan_eea"] {
+            let both = with(Some(together));
+            assert_eq!(
+                declares_other_device(Cursor::new(both), "xuanyuan").unwrap(),
+                None,
+                "{together:?} names this phone among others"
+            );
+        }
+        // A name that only starts the same is another phone.
+        let near = with(Some("xuanyuan_eea"));
+        assert_eq!(
+            declares_other_device(Cursor::new(near), "xuanyuan").unwrap(),
+            Some("xuanyuan_eea".to_string()),
+            "a longer name is not this one"
+        );
         let silent = with(None);
         assert_eq!(
             declares_other_device(Cursor::new(silent), "xuanyuan").unwrap(),

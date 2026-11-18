@@ -42,7 +42,13 @@ writes = [{ path = "/sys/class/touch/touch_dev/enable_touch_raw", value = "0" }]
 # /dev/xiaomi-touch (done at panel bring-up); its taps arrive as KEY_WAKEUP.
 double_tap = true
 
-# Decryption for the ColorOS 17 port (PMA120), v2.
+# The modem partition holds the firmware the kernel's loader asks for — the
+# ADSP's and the radios' — and is shown at /firmware for it. The secure
+# element's HAL cannot open the TA until the DSP is running, and the weaver
+# behind the lock screen's secret goes with it, so this sits on the
+# decryption path and not only on the radios'. It was named for the ColorOS
+# port this configuration was first written against; the need is the
+# phone's, not that port's.
 [firmware]
 partition = "modem"
 
@@ -70,7 +76,8 @@ groups = ["root", "system", "wakelock", "graphics"]
 # Decrypt chain, after Rinrroy/skyward-for-haotian v0.2.2 (same SM8750 vendor
 # family, tested there). Needs that fork's recovery binary, which supports
 # `sockets`. A program missing from this vendor is skipped. Thales weaver /
-# OMAPI / eSE are left out: on the ColorOS port the weaver HAL is not running.
+# OMAPI / eSE are left out *of the port this was written against*, where the
+# weaver HAL is not running; on the Chinese system they are kept, below.
 [[service]]
 path = "/vendor/bin/qseecomd"
 libraries = ["/system/lib64", "/vendor/lib64"]
