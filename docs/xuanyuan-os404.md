@@ -96,6 +96,11 @@ erofs/f2fs 的超级块在偏移 1024，ext4 的魔数在 1080。
 | LP 读取/编码/扩容/提交 | `cargo test -p skyward-lp` | 18 项通过（原有 7 项、扩容 11 项） |
 | sparse 解析与写入 | 独立 harness | 4 项通过（RAW/FILL/DON'T CARE 混合、坏 CRC 拒绝、格式错误不改盘、多段空洞） |
 | Android 全工作区 | `cargo ndk -t arm64-v8a --platform 30 check --workspace --all-targets` | 通过 |
+| Android 全工作区 lint | `cargo ndk -t arm64-v8a --platform 30 clippy --workspace --all-targets -- -D warnings` | 通过，零告警 |
+
+上面四项都是在提交 `07bec16` 的干净工作树上跑的（`cargo` 退出码 0）。
+Windows 主机上跑不了整个 workspace 的 `cargo test`：`skyward-bootimg` 的 ramdisk 解包用的是
+Unix 专有接口，这与本次改动无关。CI 的 `ubuntu-24.04` 上会跑完整 `cargo test --workspace`。
 
 **没有验证的**：真机上的 `/data` 解密、OTA 安装、扩容后 mount、sparse 实际写盘。
 这些都需要一台已解锁的 xuanyuan 配合原厂 OS4.0.4.0 底包，本环境做不到。
