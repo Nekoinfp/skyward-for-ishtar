@@ -1050,7 +1050,7 @@ fn flash_logical<S>(ctx: &mut Context, mount: &Mount<S>, base: &str, slots: &[Sl
     }
     let mut wholes = Vec::new();
     for &slot in slots {
-        let name = format!("skyward-flash-{base}{}", slot.suffix());
+        let name = format!("{}{}{}", image::FLASH_MAPPING, base, slot.suffix());
         match skyward_vab::map_whole(slot, base, &name, false) {
             Ok(whole) => wholes.push(whole),
             Err(e) => {
@@ -1059,7 +1059,7 @@ fn flash_logical<S>(ctx: &mut Context, mount: &Mount<S>, base: &str, slots: &[Sl
             }
         }
     }
-    let result = flash_to(ctx, mount, size, &wholes.iter().map(|w| w.device.clone()).collect::<Vec<_>>());
+    let result = flash_to_as(ctx, mount, size, &wholes.iter().map(|w| w.device.clone()).collect::<Vec<_>>(), true);
     let mut cleanup = Ok(());
     for whole in &wholes {
         if let Err(e) = skyward_vab::unmap_whole(whole) { cleanup = Err(e); }
@@ -1089,14 +1089,24 @@ fn flash_super<S>(ctx: &mut Context, mount: &Mount<S>, size: u64) -> Result<()> 
 /// Write `size` bytes of the package being served to `devices`, telling the
 /// screen how far it is.
 fn flash_to<S>(ctx: &Context, mount: &Mount<S>, size: u64, devices: &[PathBuf]) -> Result<()> {
+    flash_to_as(ctx, mount, size, devices, false)
+}
+
+/// [`flash_to`] into super's logical partitions, whose device is a mapping of
+/// a filesystem rather than a partition of the phone.
+fn flash_to_as<S>(ctx: &Context, mount: &Mount<S>, size: u64, devices: &[PathBuf], logical: bool) -> Result<()> {
     let mut file = BufReader::with_capacity(1 << 20, File::open(mount.path()).context("open the package")?);
     let mut told: Option<Instant> = None;
-    image::flash(&mut file, size, devices, &mut |done, total| {
+    let mut progress = |done: u64, total: u64| {
         if done == total || told.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY) {
             ctx.send(Event::Progress(Stage::Flashing { done, total }));
             told = Some(Instant::now());
         }
-    })
+    };
+    match logical {
+        true => image::flash_logical(&mut file, size, devices, &mut progress),
+        false => image::flash(&mut file, size, devices, &mut progress),
+    }
 }
 
 /// Run the install script of the zip being served, `size` bytes, once the

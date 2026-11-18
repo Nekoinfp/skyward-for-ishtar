@@ -71,6 +71,20 @@ const RATE_EVERY: u64 = 1 << 30;
 /// mapping is a filesystem, not a partition of the phone.
 pub const FLASH_MAPPING: &str = "skyward-flash-";
 
+/// What the image being written is: a partition of the phone, or a filesystem
+/// for one of super's logical partitions.
+///
+/// A partition image is a boot image or an update of the whole partition, so
+/// fastboot's rule for a signed image applies and the range written may be
+/// discarded first. A filesystem image is neither: its AVB footer, if it has
+/// one, belongs where it is, and a sparse filesystem leaves untouched
+/// everything its chunks do not reach.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Purpose {
+    Partition,
+    Logical,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageKind {
     /// A boot image; what it carries decides where it can go.
@@ -328,6 +342,22 @@ fn has_partition(kind: ImageKind, dir: &Path, name: &str) -> Result<bool> {
 /// to the partition's end, with zeros between, as fastboot does. `progress`
 /// hears the bytes written and read back so far, of all.
 pub fn flash<R: Read + Seek + Send>(image: &mut R, len: u64, devices: &[PathBuf], progress: &mut dyn FnMut(u64, u64)) -> Result<()> {
+    flash_as(image, len, devices, Purpose::Partition, progress)
+}
+
+/// Write a filesystem image into the logical partitions `devices` are mapped
+/// as, each of which must hold all of it. See [`Purpose`].
+pub fn flash_logical<R: Read + Seek + Send>(image: &mut R, len: u64, devices: &[PathBuf], progress: &mut dyn FnMut(u64, u64)) -> Result<()> {
+    flash_as(image, len, devices, Purpose::Logical, progress)
+}
+
+fn flash_as<R: Read + Seek + Send>(
+    image: &mut R,
+    len: u64,
+    devices: &[PathBuf],
+    purpose: Purpose,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<()> {
     ensure!(!devices.is_empty(), "no partition to write");
     let mut outs = Vec::with_capacity(devices.len());
     for path in devices {
@@ -339,14 +369,12 @@ pub fn flash<R: Read + Seek + Send>(image: &mut R, len: u64, devices: &[PathBuf]
     let size = outs[0].2;
     ensure!(outs.iter().all(|(_, _, s)| *s == size), "the partition differs in size between slots");
     // A logical partition is written through a mapping this recovery made for
-    // the write alone, named as `flash_logical` names it. Its image is a
-    // filesystem, not a partition: no AVB footer is moved in it, and the
-    // device must not be discarded, since a sparse image leaves untouched
-    // everything its chunks do not reach.
-    let logical = devices.iter().all(|path| path.file_name().is_some_and(|name| name.to_string_lossy().starts_with(FLASH_MAPPING)));
+    // the write alone. Its image is a filesystem, not a partition: no AVB
+    // footer is moved in it, and the device must not be discarded, since a
+    // sparse image leaves untouched everything its chunks do not reach.
+    let logical = purpose == Purpose::Logical;
     if let Some(expanded) = crate::sparse::expanded_size(image, len).context("check the sparse image")? {
         ensure!(expanded <= size, "the sparse image expands to {expanded} bytes, more than the {size} its partition holds");
-        ensure!(!logical || outs.len() <= 2, "a sparse image goes to one slot at a time");
         for (path, f, _) in &mut outs {
             crate::sparse::flash(image, len, f, progress)?;
             f.sync_all().with_context(|| format!("flush {}", path.display()))?;
