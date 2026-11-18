@@ -102,6 +102,18 @@ erofs/f2fs 的超级块在偏移 1024，ext4 的魔数在 1080。
 Windows 主机上跑不了整个 workspace 的 `cargo test`：`skyward-bootimg` 的 ramdisk 解包用的是
 Unix 专有接口，这与本次改动无关。CI 的 `ubuntu-24.04` 上会跑完整 `cargo test --workspace`。
 
+另外两项构建输入的核对：
+
+| 项 | 做法 | 结果 |
+| --- | --- | --- |
+| `devices/xuanyuan.toml` 的 `[device] ab` 等配置能被解析 | `cargo test -p skyward-config` | 28 项通过 |
+| `[stock] recovery` 的 SHA-256 与固件一致 | 从 `payload.bin` 清单里读 recovery 分区的声明哈希 | 一致（`55f49105…7fea27b`） |
+
+第二项是这样做的：底包 zip 有 9.7 GB，但 `payload.bin` 以 Stored 方式存放，
+所以按 HTTP Range 只读了它的清单（约 370 KB），解析 protobuf 取出
+`partitions[name="recovery"].new_partition_info.hash` 与配置比对。
+底包地址本身返回 `200`、`Content-Length` 10382731686 字节。
+
 **没有验证的**：真机上的 `/data` 解密、OTA 安装、扩容后 mount、sparse 实际写盘。
 这些都需要一台已解锁的 xuanyuan 配合原厂 OS4.0.4.0 底包，本环境做不到。
 所以本分支**不宣称**“已完全适配”，只提供可编译、单元测试通过、且失败会安全中止的实现。
