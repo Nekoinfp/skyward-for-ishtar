@@ -502,10 +502,24 @@ fn check(config: &Path) -> Result<()> {
             if entry.extra("metadata_encryption").is_none() {
                 println!("    note: no metadata_encryption, so this table says the partition is not encrypted whole");
             }
+            // The directory Android keeps the wrapped key in. Its files are
+            // named and measured, never read: what they hold is the key.
             match skyward_crypto::data::key_dir(entry) {
-                Ok(dir) => match std::fs::metadata(dir.join("key")) {
-                    Ok(m) => println!("  the key it keeps     {} ({} bytes)", dir.join("key").display(), m.len()),
-                    Err(e) => println!("  the key it keeps     {} ({e})", dir.join("key").display()),
+                Ok(dir) => match std::fs::read_dir(&dir) {
+                    Ok(entries) => {
+                        let mut kept: Vec<String> = entries
+                            .flatten()
+                            .map(|e| {
+                                let name = e.file_name().to_string_lossy().into_owned();
+                                let len = e.metadata().map(|m| m.len()).unwrap_or(0);
+                                format!("{name} ({len} bytes)")
+                            })
+                            .collect();
+                        kept.sort();
+                        let said = if kept.is_empty() { "empty".to_string() } else { kept.join(", ") };
+                        println!("  the key it keeps     {}: {said}", dir.display());
+                    }
+                    Err(e) => println!("  the key it keeps     {} ({e})", dir.display()),
                 },
                 Err(e) => println!("  the key it keeps     ({e:#})"),
             }

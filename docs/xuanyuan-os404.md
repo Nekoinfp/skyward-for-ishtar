@@ -159,7 +159,7 @@ Unix 专有接口，这与本次改动无关。CI 的 `ubuntu-24.04` 上会跑�
 
 | 项 | 做法 | 结果 |
 | --- | --- | --- |
-| `devices/xuanyuan.toml` 的 `[device] ab` 等配置能被解析 | `cargo test -p skyward-config` | 28 项通过 |
+| `devices/xuanyuan.toml` 能被真实解析器读入 | `cargo test -p skyward-config` | 29 项通过（新增 1 项专测 xuanyuan 配置） |
 | `[stock] recovery` 的 SHA-256 与固件一致 | 从 `payload.bin` 清单里读 recovery 分区的声明哈希 | 一致（`55f49105…7fea27b`） |
 
 第二项是这样做的：底包 zip 有 9.7 GB，但 `payload.bin` 以 Stored 方式存放，

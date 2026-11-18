@@ -785,6 +785,44 @@ mod tests {
     }
 
     #[test]
+    fn xuanyuan_is_built_on_the_build_it_runs_and_leaves_the_element_node_alone() {
+        let cfg = DeviceConfig::parse(include_str!("../../../devices/xuanyuan.toml")).unwrap();
+        assert_eq!((cfg.device.codename.as_str(), cfg.device.brand.as_str()), ("xuanyuan", "Xiaomi"));
+        assert!(cfg.device.ab, "xuanyuan has two slots");
+        // The recovery is packed on the build the phone runs, and the package
+        // it comes from is the one whose recovery partition the configuration
+        // names by its sum.
+        let stock = cfg.stock.expect("xuanyuan is built on a stock build");
+        assert_eq!(stock.version, "OS4.0.4.0.XOACNXM");
+        assert_eq!(stock.recovery.len(), 64, "a SHA-256 is 64 hex characters");
+        assert!(stock.package.starts_with("https://"), "the package is fetched over HTTPS");
+        // Nothing is handed to another account: the secure element's service
+        // runs as root, and a hand-over that fails stops the whole key start
+        // over a node nothing else opens.
+        assert!(
+            cfg.owners.is_empty(),
+            "a node nothing needs must not be able to stop the key start"
+        );
+        assert_eq!(cfg.partitions.mounted, ["persist"]);
+        assert_eq!(cfg.firmware.map(|f| f.partition), Some("modem".to_string()));
+        // The chain the data partition waits on, each step registered before
+        // the next starts.
+        let chain: Vec<&str> = cfg.services.iter().filter_map(|s| s.ready_service.as_deref()).collect();
+        for wanted in [
+            "android.hardware.security.keymint.IKeyMintDevice/default",
+            "android.hardware.gatekeeper.IGatekeeper/default",
+            "android.hardware.secure_element.ISecureElement/eSE1",
+            "android.se.omapi.ISecureElementService/default",
+            "android.hardware.weaver.IWeaver/default",
+        ] {
+            assert!(chain.contains(&wanted), "{wanted} is started and waited for");
+        }
+        // The Peach revision this phone's chip is, not the first one.
+        let wlan = cfg.wlan.expect("xuanyuan brings its WLAN up");
+        assert_eq!(wlan.modules, ["rfkill", "qca_cld3_peach_v2"]);
+    }
+
+    #[test]
     fn a_phone_gives_its_logd_the_libraries_its_recovery_leaves_out() {
         let cfg = DeviceConfig::parse(include_str!("../../../devices/haotian.toml")).unwrap();
         let logd = cfg.logd.expect("haotian's recovery leaves out what its logd loads");
