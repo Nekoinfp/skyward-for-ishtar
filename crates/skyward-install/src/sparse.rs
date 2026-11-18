@@ -205,6 +205,64 @@ pub fn flash<R: Read + Seek + Send, W: Write + Seek>(input: &mut R, file_size: u
     })
 }
 
+/// Whether the bytes a sparse image expands to at `at` are `magic`.
+///
+/// A sparse super image keeps super's geometry past its first page, and one
+/// chunk covers that offset: read those four bytes without expanding the
+/// whole image. A hole reads as whatever the device already holds, which
+/// cannot be told from here, so it is not taken for super's geometry.
+pub fn expands_to<R: Read + Seek>(input: &mut R, at: u64, magic: [u8; 4]) -> Result<bool> {
+    let file_size = input.seek(SeekFrom::End(0))?;
+    input.rewind()?;
+    let mut head = [0u8; HEADER as usize];
+    input.read_exact(&mut head).context("read sparse header")?;
+    ensure!(head[..4] == MAGIC, "not an Android sparse image");
+    let block = u64::from(u32::from_le_bytes(head[12..16].try_into().expect("four bytes")));
+    ensure!(block != 0 && block.is_multiple_of(4), "invalid sparse block size {block}");
+    let file_header = u64::from(u16::from_le_bytes(head[8..10].try_into().expect("two bytes")));
+    let chunk_header = u64::from(u16::from_le_bytes(head[10..12].try_into().expect("two bytes")));
+    ensure!(file_header >= HEADER && chunk_header >= CHUNK_HEADER, "short sparse header");
+    let mut file_at = file_header;
+    let mut out_at = 0u64;
+    for _ in 0..u32::from_le_bytes(head[20..24].try_into().expect("four bytes")) {
+        ensure!(file_size.checked_sub(file_at).is_some_and(|left| left >= CHUNK_HEADER), "truncated sparse chunk header");
+        input.seek(SeekFrom::Start(file_at))?;
+        let mut h = [0u8; CHUNK_HEADER as usize];
+        input.read_exact(&mut h)?;
+        let kind = u16::from_le_bytes(h[..2].try_into().expect("two bytes"));
+        let blocks = u64::from(u32::from_le_bytes(h[4..8].try_into().expect("four bytes")));
+        let total = u64::from(u32::from_le_bytes(h[8..12].try_into().expect("four bytes")));
+        let payload = total.checked_sub(chunk_header).context("sparse chunk shorter than its header")?;
+        let len = block.checked_mul(blocks).context("sparse chunk size overflow")?;
+        let source = file_at.checked_add(chunk_header).context("sparse chunk offset overflow")?;
+        ensure!(file_size.checked_sub(source).is_some_and(|left| left >= payload), "truncated sparse chunk payload");
+        let end = out_at.checked_add(len).context("expanded offset overflow")?;
+        if out_at <= at && at + 4 <= end {
+            let offset = at - out_at;
+            let mut bytes = [0u8; 4];
+            match kind {
+                RAW => {
+                    input.seek(SeekFrom::Start(source + offset))?;
+                    input.read_exact(&mut bytes)?;
+                }
+                FILL => {
+                    let mut pattern = [0u8; 4];
+                    input.seek(SeekFrom::Start(source))?;
+                    input.read_exact(&mut pattern)?;
+                    for (i, byte) in bytes.iter_mut().enumerate() {
+                        *byte = pattern[(offset as usize + i) % 4];
+                    }
+                }
+                _ => return Ok(false),
+            }
+            return Ok(bytes == magic);
+        }
+        out_at = end;
+        file_at = source.checked_add(payload).context("sparse offset overflow")?;
+    }
+    Ok(false)
+}
+
 fn write_zeroes(crc: &mut crc32fast::Hasher, mut len: u64) {
     let zeros = [0u8; 64 * 1024];
     while len != 0 {
@@ -273,6 +331,31 @@ mod tests {
         let mut out = Cursor::new(vec![0; 4096]);
         let result = flash(&mut input, bytes.len() as u64, &mut out, &mut |_, _| {});
         assert!(result.is_err(), "bad CRC was accepted: {result:?}");
+    }
+
+    #[test]
+    fn a_sparse_image_whose_expanded_bytes_are_the_geometry_is_told_apart() {
+        let magic = 0x616c_4467u32.to_le_bytes();
+
+        let mut holding = vec![0u8; 8192];
+        holding[4096..4100].copy_from_slice(&magic);
+        let bytes = image(4096, &[(RAW, 2, &holding)], None);
+        assert!(expands_to(&mut Cursor::new(bytes.clone()), 4096, magic).unwrap(), "a raw chunk holding the geometry");
+
+        let plain = vec![0u8; 8192];
+        let bytes = image(4096, &[(RAW, 2, &plain)], None);
+        assert!(!expands_to(&mut Cursor::new(bytes.clone()), 4096, magic).unwrap(), "zeros where the geometry would be");
+
+        // A block-aligned fill of the geometry's own bytes.
+        let bytes = image(4096, &[(FILL, 2, &magic)], None);
+        assert!(expands_to(&mut Cursor::new(bytes.clone()), 4096, magic).unwrap(), "a fill pattern the geometry is");
+
+        // A hole reads as whatever the device holds, which an image cannot say.
+        let bytes = image(4096, &[(DONT_CARE, 2, &[])], None);
+        assert!(!expands_to(&mut Cursor::new(bytes.clone()), 4096, magic).unwrap(), "a hole is not the geometry");
+
+        // Anything that is not a sparse image at all.
+        assert!(expands_to(&mut Cursor::new(vec![0u8; 8192]), 4096, magic).is_err());
     }
 
     #[test]

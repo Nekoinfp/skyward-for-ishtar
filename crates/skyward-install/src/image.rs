@@ -154,7 +154,8 @@ pub fn detect<R: Read + Seek>(file: &mut R, head: &[u8]) -> Result<Option<ImageK
         return Ok(Some(ImageKind::Vbmeta));
     }
     if head.starts_with(SPARSE_MAGIC) {
-        return Ok(Some(if sparse_super(file)? { ImageKind::Super } else { ImageKind::Logical }));
+        let super_image = crate::sparse::expands_to(file, SUPER_GEOMETRY_AT, SUPER_GEOMETRY_MAGIC)?;
+        return Ok(Some(if super_image { ImageKind::Super } else { ImageKind::Logical }));
     }
     // A filesystem for one logical partition: erofs and f2fs open their
     // superblock a kilobyte in, and ext4 keeps its magic inside that one.
@@ -177,49 +178,6 @@ pub fn detect<R: Read + Seek>(file: &mut R, head: &[u8]) -> Result<Option<ImageK
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
         Err(e) => Err(e).context("read where a super image's geometry opens"),
     }
-}
-
-fn sparse_super<R: Read + Seek>(file: &mut R) -> Result<bool> {
-    let file_size = file.seek(SeekFrom::End(0))?;
-    let head = file.seek(SeekFrom::Start(0)).and_then(|_| {
-        let mut h = [0u8; 28];
-        file.read_exact(&mut h).map(|_| h)
-    })?;
-    let block = u64::from(u32::from_le_bytes(head[12..16].try_into().unwrap()));
-    ensure!(block.is_multiple_of(4) && block != 0, "invalid sparse block size");
-    let mut file_at = u64::from(u16::from_le_bytes(head[8..10].try_into().unwrap()));
-    let chunk_header = u64::from(u16::from_le_bytes(head[10..12].try_into().unwrap()));
-    let mut out_at = 0u64;
-    for _ in 0..u32::from_le_bytes(head[20..24].try_into().unwrap()) {
-        file.seek(SeekFrom::Start(file_at))?;
-        let mut h = [0u8; 12];
-        file.read_exact(&mut h)?;
-        let kind = u16::from_le_bytes(h[..2].try_into().unwrap());
-        let out = block.checked_mul(u64::from(u32::from_le_bytes(h[4..8].try_into().unwrap()))).context("sparse chunk size overflow")?;
-        let payload = u64::from(u32::from_le_bytes(h[8..12].try_into().unwrap())).checked_sub(chunk_header).context("short sparse chunk")?;
-        ensure!(file_at + chunk_header + payload <= file_size, "truncated sparse chunk");
-        if kind != 0xcac4 && out_at <= SUPER_GEOMETRY_AT && SUPER_GEOMETRY_AT + 4 <= out_at + out {
-            let offset = SUPER_GEOMETRY_AT - out_at;
-            let mut bytes = [0; 4];
-            match kind {
-                0xcac1 => {
-                    file.seek(SeekFrom::Start(file_at + chunk_header + offset))?;
-                    file.read_exact(&mut bytes)?;
-                }
-                0xcac2 => {
-                    let mut pattern = [0; 4];
-                    file.seek(SeekFrom::Start(file_at + chunk_header))?;
-                    file.read_exact(&mut pattern)?;
-                    for (i, byte) in bytes.iter_mut().enumerate() { *byte = pattern[(offset as usize + i) % 4]; }
-                }
-                _ => return Ok(false),
-            }
-            return Ok(bytes == SUPER_GEOMETRY_MAGIC);
-        }
-        out_at += out;
-        file_at += chunk_header + payload;
-    }
-    Ok(false)
 }
 
 /// Whether a packed ramdisk is a recovery's, by the names in its archive.
