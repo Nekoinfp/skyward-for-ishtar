@@ -324,13 +324,19 @@ fn flash_as<R: Read + Seek + Send>(
         f.seek(SeekFrom::Start(0)).with_context(|| format!("rewind {}", path.display()))?;
         outs.push((path, f, size));
     }
-    let size = outs[0].2;
-    ensure!(outs.iter().all(|(_, _, s)| *s == size), "the partition differs in size between slots");
     // A logical partition is written through a mapping this recovery made for
     // the write alone. Its image is a filesystem, not a partition: no AVB
     // footer is moved in it, and the device must not be discarded, since a
     // sparse image leaves untouched everything its chunks do not reach.
     let logical = purpose == Purpose::Logical;
+    // A partition written into both slots is the same one mirrored, so the two
+    // agree on its size. A logical partition need not: one slot may have been
+    // grown, or an update may have resized one of them, so each is asked for
+    // the room it actually has rather than all for the first one's.
+    let size = outs.iter().map(|(_, _, size)| *size).min().unwrap_or(0);
+    if !logical {
+        ensure!(outs.iter().all(|(_, _, s)| *s == size), "the partition differs in size between slots");
+    }
     if let Some(expanded) = crate::sparse::expanded_size(image, len).context("check the sparse image")? {
         ensure!(expanded <= size, "the sparse image expands to {expanded} bytes, more than the {size} its partition holds");
         for (path, f, _) in &mut outs {
@@ -677,6 +683,37 @@ mod tests {
         let mut seen = Vec::new();
         flash(&mut Cursor::new(image), image.len() as u64, devices, &mut |done, total| seen.push((done, total)))?;
         Ok(seen)
+    }
+
+    fn flash_into_logical(image: &[u8], devices: &[PathBuf]) -> Result<()> {
+        flash_logical(&mut Cursor::new(image), image.len() as u64, devices, &mut |_, _| {})
+    }
+
+    #[test]
+    fn a_logical_partition_may_hold_another_amount_in_each_slot() {
+        // One slot grown, or an update that resized one of them, leaves the
+        // two slots' partitions of the same name different lengths.
+        let dir = tempfile::tempdir().unwrap();
+        let slots = [partition(dir.path(), "system_a", 3 << 20), partition(dir.path(), "system_b", 2 << 20)];
+        let image = vec![0x5Au8; 1 << 20];
+        flash_into_logical(&image, &slots).unwrap();
+        for path in &slots {
+            let got = std::fs::read(path).unwrap();
+            assert_eq!(&got[..image.len()], &image[..], "{} holds the image", path.display());
+            assert!(
+                got[image.len()..].iter().all(|&b| b == 0xaa),
+                "and nothing past it, {}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn a_partition_written_into_both_slots_is_the_same_size_in_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let slots = [partition(dir.path(), "boot_a", 8192), partition(dir.path(), "boot_b", 4096)];
+        let err = flash_all(&[1u8; 4096], &slots).unwrap_err();
+        assert!(err.to_string().contains("differs in size"), "{err}");
     }
 
     #[test]
