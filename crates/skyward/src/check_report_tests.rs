@@ -15,6 +15,7 @@ fn gathered(line: &str) -> Gathered {
         installed: Some(("OS4.0.4.0.XOACNXM".into(), "15".into(), "2026-10-01".into())),
         tables: vec![("/vendor/etc/fstab.qcom", true), ("/odm/etc/fstab.qcom", false)],
         data: Some(entry(line)),
+        data_open: true,
         key_dir: Some("/metadata/vold/metadata_encryption/key".into()),
         key_files: Some(vec![("key".into(), 64)]),
         read_through: Some("/dev/block/by-name/userdata".into()),
@@ -52,6 +53,7 @@ fn the_report_names_the_parts_the_data_partition_needs() {
         "fileencryption: aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0",
         "the key it keeps: /metadata/vold/metadata_encryption/key: key (64 bytes)",
         "/data is read through: /dev/block/by-name/userdata",
+        "the data partition: open, its files can be read",
         "registered: android.hardware.security.keymint.IKeyMintDevice/default",
         "NOT registered: android.hardware.weaver.IWeaver/default",
         "an update in flight: None",
@@ -118,3 +120,16 @@ fn a_kept_log_gives_its_last_lines_and_leaves_the_blank_ones_out() {
     assert!(kept.iter().all(|line| !line.is_empty()), "blank lines are left out");
     assert!(kept_lines("short\n").len() == 1, "a short log is kept whole");
 }
+
+    #[test]
+    fn a_partition_left_closed_says_so_while_the_rest_still_prints() {
+        // On the phone: every service registered, the key files readable, and
+        // the partition shut until the owner's credential is given. The
+        // report has to say which of those it is.
+        let mut g = gathered(ENCRYPTED);
+        g.data_open = false;
+        let said = report(&g);
+        assert!(said.contains("the data partition: closed"), "{said}");
+        assert!(said.contains("metadata_encryption: aes-256-xts:wrappedkey_v0"), "the table is still reported: {said}");
+        assert!(said.contains("registered: android.hardware.security.keymint"), "{said}");
+    }

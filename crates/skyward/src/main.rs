@@ -473,6 +473,10 @@ struct Gathered {
     /// Each table the phone keeps, and whether it is there.
     tables: Vec<(&'static str, bool)>,
     data: Option<skyward_block::fstab::Entry>,
+    /// Whether the data partition is mounted now, so that its files can be
+    /// read; a recovery that has not been given what it needs to unwrap the
+    /// key leaves it closed.
+    data_open: bool,
     /// Whether the table was read but said nothing about /data.
     said_nothing_about_data: bool,
     data_error: Option<String>,
@@ -551,6 +555,13 @@ fn report(g: &Gathered) -> String {
         (None, Some(error)) => out.push_str(&format!("  /data is read through: ({error})\n")),
         _ => out.push_str("  /data is read through: (not looked at, the table names none)\n"),
     }
+    // Whether it is open is the whole point of the rest of this report: the
+    // key it keeps and the services above are what stands between a closed
+    // partition and a readable one.
+    out.push_str(match g.data_open {
+        true => "  the data partition: open, its files can be read\n",
+        false => "  the data partition: closed, so nothing in it can be read yet\n",
+    });
 
     out.push_str("\nthe services the key chain needs\n");
     if g.services.is_empty() {
@@ -651,6 +662,7 @@ fn check(config: &Path) -> Result<()> {
         .iter()
         .filter_map(|s| s.ready_service.as_ref().map(|name| (name.clone(), services::registered(name))))
         .collect();
+    g.data_open = skyward_block::mount::is_mount_point(std::path::Path::new("/data")).unwrap_or(false);
     match skyward_vab::snapshot_state() {
         Ok(state) => g.update = Some(format!("{state:?}")),
         Err(e) => g.update_error = Some(format!("{e:#}")),
