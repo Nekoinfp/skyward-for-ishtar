@@ -545,6 +545,17 @@ fn backups() -> PathBuf {
     PathBuf::from("/tmp")
 }
 
+/// The name of the `attempt`th copy of a slot's vbmeta, `stamp` being when it
+/// was taken: the first is the stamp alone and each later one is a number
+/// away from it, so that two changes taken inside one tick of the clock still
+/// get a name each.
+fn backup_name(stem: &str, stamp: u128, attempt: u32) -> String {
+    match attempt {
+        0 => format!("{stem}-{stamp}.img"),
+        n => format!("{stem}-{stamp}-{n}.img"),
+    }
+}
+
 /// Read the state of `suffix`'s vbmeta image, given whether the bootloader is
 /// unlocked.
 fn read_state(by_name: &Path, suffix: &str, unlocked: bool) -> io::Result<State> {
@@ -763,12 +774,29 @@ fn change_flags_at(by_name: &Path, backups: &Path, expected: &State, unlocked: b
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(io::Error::other)?
         .as_nanos();
-    let name = match expected.suffix.as_str() {
-        "" => format!("skyward-vbmeta-{stamp}.img"),
-        suffix => format!("skyward-vbmeta{suffix}-{stamp}.img"),
+    let stem = match expected.suffix.as_str() {
+        "" => "skyward-vbmeta".to_string(),
+        suffix => format!("skyward-vbmeta{suffix}"),
     };
-    let backup = backups.join(name);
-    let mut saved = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&backup).map_err(|e| about(&backup, e))?;
+    // Two changes inside one tick of the clock — a script that turns a check
+    // off and on again, or a clock whose smallest step is longer than the
+    // work — would ask for the same name twice. The second gets its own
+    // rather than failing: it is a second change, and it needs its own copy.
+    let (backup, mut saved) = {
+        let mut made = None;
+        for attempt in 0..64u32 {
+            let path = backups.join(backup_name(&stem, stamp, attempt));
+            match OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path) {
+                Ok(file) => {
+                    made = Some((path, file));
+                    break;
+                }
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(about(&path, e)),
+            }
+        }
+        made.ok_or_else(|| io::Error::other(format!("no free name for a copy of {} under {}", path.display(), backups.display())))?
+    };
     saved.write_all(&original).and_then(|()| saved.sync_all()).map_err(|e| about(&backup, e))?;
     let mut wanted_bytes = original.clone();
     wanted_bytes[FLAGS_AT..FLAGS_AT + 4].copy_from_slice(&wanted.to_be_bytes());
@@ -810,11 +838,34 @@ mod tests {
         image
     }
 
+    /// The tests here are the only ones that take a lock on a file, and the
+    /// command refuses a file another writer holds rather than waiting for it.
+    /// Two of them side by side are taken for such a writer: a file made now
+    /// can land on the inode a test that just ended left, while that test's
+    /// descriptor is still open in its thread, and the lock it holds is then
+    /// read as a rival's. They take this first so only one is in that code at
+    /// a time — sixty runs in a row passed with it, where about one in fifteen
+    /// failed without.
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn ran(args: &[&str], phone: &Phone) -> (i32, String, String) {
+        // Poisoned by a test that failed while holding it is no reason for the
+        // ones after it to fail too.
+        let _one_at_a_time = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let args: Vec<OsString> = args.iter().map(OsString::from).collect();
         let (mut output, mut errors) = (Vec::new(), Vec::new());
         let code = avbctl(&args, &mut Io { input: &mut io::empty(), output: &mut output, errors: &mut errors }, phone);
         (code, String::from_utf8(output).unwrap(), String::from_utf8(errors).unwrap())
+    }
+
+    #[test]
+    fn copies_taken_in_one_tick_of_the_clock_are_named_apart() {
+        let names: Vec<String> = (0..4).map(|n| backup_name("skyward-vbmeta_a", 7, n)).collect();
+        assert_eq!(names[0], "skyward-vbmeta_a-7.img");
+        assert_eq!(names[3], "skyward-vbmeta_a-7-3.img");
+        let unique: std::collections::BTreeSet<&String> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "no two of them are the same");
+        assert_eq!(backup_name("skyward-vbmeta", 7, 0), "skyward-vbmeta-7.img", "a phone with no slot suffix");
     }
 
     #[test]
@@ -831,16 +882,20 @@ mod tests {
         );
         assert_eq!(fs::read(&a).unwrap(), vbmeta(1), "the verity flag set and nothing else");
         assert_eq!(ran(&["disable-verity"], &phone), (0, "verity is already disabled on slot with suffix _a.\n".into(), String::new()));
-        assert_eq!(ran(&["disable-verification", "--force"], &phone).0, 0, "the command and --force in either order");
+        let (code, _, errors) = ran(&["disable-verification", "--force"], &phone);
+        assert_eq!(code, 0, "the command and --force in either order; it said {errors:?}");
         assert_eq!(fs::read(&a).unwrap(), vbmeta(3));
         assert_eq!(ran(&["get-verification"], &phone).1, "verification is disabled on slot with suffix _a.\n");
         assert_eq!(ran(&["get-verity"], &phone).1, "verity is disabled on slot with suffix _a.\n");
+        let (code, output, errors) = ran(&["enable-verity"], &phone);
         assert_eq!(
-            ran(&["enable-verity"], &phone).1,
-            "Successfully enabled verity on slot with suffix _a. Reboot the device for changes to take effect.\n"
+            (code, output.as_str()),
+            (0, "Successfully enabled verity on slot with suffix _a. Reboot the device for changes to take effect.\n"),
+            "what it said on its error output: {errors:?}"
         );
         assert_eq!(fs::read(&a).unwrap(), vbmeta(2));
-        assert_eq!(ran(&["enable-verification"], &phone).0, 0);
+        let (code, _, errors) = ran(&["enable-verification"], &phone);
+        assert_eq!(code, 0, "what it said on its error output: {errors:?}");
         assert_eq!(fs::read(&a).unwrap(), vbmeta(0));
         assert_eq!(fs::read(&b).unwrap(), vbmeta(0), "the other slot's as it was");
     }
@@ -947,7 +1002,8 @@ mod tests {
         assert_eq!(fs::read(&b).unwrap(), vbmeta(2));
         assert_eq!(ran(&["disable-verification"], &phone), (0, "verification is already disabled on slot with suffix _a.\n".into(), String::new()));
         // And on again, in both.
-        assert_eq!(ran(&["enable-verification"], &phone).0, 0);
+        let (code, _, errors) = ran(&["enable-verification"], &phone);
+        assert_eq!(code, 0, "what it said on its error output: {errors:?}");
         assert_eq!(fs::read(&a).unwrap(), vbmeta(0));
         assert_eq!(fs::read(&b).unwrap(), vbmeta(0));
     }
