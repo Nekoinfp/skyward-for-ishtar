@@ -212,6 +212,16 @@ target/release/skyward-pack recovery \
 
 `.github/workflows/build-xuanyuan.yml` 已经按这套流程构建并校验原厂 recovery 的 SHA-256。
 
+### 没有 Linux 环境时怎么拿到镜像
+
+不用本地搭 NDK：把本分支推到自己的 fork，仓库自带的
+`.github/workflows/build-xuanyuan.yml` 会
+
+1. 在 `ubuntu-24.04` 上跑 `cargo test --workspace` 与 `clippy -D warnings`；
+2. 用 `cargo ndk` 构建 `skyward`、静态的 `system-init` / `permissive-init`；
+3. 用 `skyward-pack` 从底包链接里只取 recovery 分区，并按 `devices/xuanyuan.toml`
+   里的 `[stock] recovery` **核对 SHA-256**（对不上直接失败，不会拿错底包）；
+
 ## 八、真机验证清单
 
 按顺序做，每一步失败就停在那里，不要继续：
