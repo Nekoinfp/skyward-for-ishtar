@@ -16,7 +16,7 @@
 | --- | --- |
 | 镜像 | `skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img` |
 | 大小 | 104,857,600 字节（与底包 recovery 分区同尺寸） |
-| SHA-256 | `15b5118396b2e476f35934aae10b0d18bbc8d18bc99a7e3857c55f1f042b2232` |
+| SHA-256 | `0054ebfaaa9d58bae058b1fd5ee2c25a4d1faea19da50f553a419f7d35d17d4e` |
 | 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,971,866 字节 |
 | 内含 recovery 本体 | 9,017,496 字节，AArch64 ELF（另含 `system/bin/snapuserd` 1,273,320 字节，读压缩快照用） |
 | 底包 | OS4.0.4.0.XOACNXM，recovery 分区 SHA-256 `55f491052a360bc15362fd80c8bd2dd0912b289e1653f2bd7f9c5a12e7fea27b`（打包器自行核对） |
