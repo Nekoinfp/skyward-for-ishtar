@@ -7664,7 +7664,9 @@ impl App {
             },
             Confirm::FactoryReset => fx.push(Effect::FactoryReset),
             Confirm::Merge => {
-                if self.state.update == Standing::Waiting {
+                // A compressed update is merged by the daemon that serves it,
+                // which the effect carries out the same way from here.
+                if matches!(self.state.update, Standing::Waiting | Standing::Compressed) {
                     self.state.update = Standing::Merging(0.0);
                     self.refresh();
                     fx.push(Effect::Merge);
@@ -9107,6 +9109,18 @@ mod tests {
         assert_eq!(tap(&mut app, &f, &i, Action::MountToggle(0)), vec![Effect::Mount("vendor".into())], "through its snapshot");
     }
 
+    /// A compressed update is merged by the daemon that serves it, which is
+    /// no reason for the page to hide the merge behind the same swipe.
+    #[test]
+    fn a_compressed_update_merges_with_the_same_swipe() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        app.set_update(Standing::Compressed);
+        assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Update)), vec![Effect::ReadUpdate]);
+        assert_eq!(app.screen(), Screen::Update);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Merge), vec![Effect::Merge], "the same effect, whichever way it runs");
+        assert_eq!(app.state.update, Standing::Merging(0.0));
+    }
     #[test]
     fn an_update_waiting_in_the_slot_merges_with_a_swipe_and_shows_how_far_it_has_come() {
         let (f, i) = (fonts(), info());

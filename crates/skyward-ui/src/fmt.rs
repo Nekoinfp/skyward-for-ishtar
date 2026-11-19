@@ -445,7 +445,7 @@ pub fn update(l: Lang, s: &Standing, next: Option<Slot>) -> (&'static str, Optio
         ),
         Standing::Compressed => (
             l.pick(["更新等待合并", "更新等待合併", "Update waiting to merge"]),
-            line(["此类更新需在系统中合并，启动系统后将自动合并", "這類更新需在系統中合併，啟動系統後將自動合併", "An update of this kind merges in the system, once it starts"]),
+            line(["由后台服务合并，启动系统后也会自动合并", "由後台服務合併，啟動系統後也會自動合併", "Merged by the background service, or by the system once it starts"]),
         ),
         Standing::Merging(_) => (l.pick(["正在合并更新", "正在合併更新", "Merging the update"]), None),
         Standing::Failed(code) => (

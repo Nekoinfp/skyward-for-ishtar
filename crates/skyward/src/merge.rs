@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use skyward_binder::driver::Binder;
 use skyward_vab::boot::BootControl;
-use skyward_vab::{Merge, Slot};
+use skyward_vab::{Merge, Slot, Standing};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
@@ -78,7 +78,8 @@ pub struct Merger {
 
 impl Merger {
     /// Follow the merge into `slot` as [`run`] does, starting it first where
-    /// `start`.
+    /// `start`. A compressed update is followed the way only it can be: by
+    /// the daemon that serves it.
     pub fn start(slot: Slot, start: bool) -> Result<Merger> {
         let mut fds = [0; 2];
         if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) } != 0 {
@@ -86,6 +87,16 @@ impl Merger {
         }
         let (wake, signal) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
         let (tx, events) = mpsc::channel();
+        // Which way this merge runs is decided once, before the thread begins,
+        // so that the thread never has to ask anything of the screen. Only a
+        // merge being started here can be of the compressed kind: one the
+        // recovery only follows was begun by the system, which drives it
+        // itself.
+        let served = start
+            && matches!(
+                (skyward_vab::standing(slot), skyward_vab::snapshots_mapped(slot)),
+                (Ok(Standing::Compressed), Ok(true))
+            );
         let thread = thread::Builder::new()
             .name("merge".into())
             .spawn(move || {
@@ -95,7 +106,12 @@ impl Merger {
                     let _ = tx.send(event);
                     unsafe { libc::write(signal.as_raw_fd(), [1u8].as_ptr().cast(), 1) };
                 };
-                if let Err(e) = run(slot, start, &mut |merge| tell(Event::Looked(*merge))) {
+                let result = if served {
+                    run_served(slot, &mut |merge| tell(Event::Looked(*merge)), &mut |_, _, _| {})
+                } else {
+                    run(slot, start, &mut |merge| tell(Event::Looked(*merge)))
+                };
+                if let Err(e) = result {
                     tell(Event::Failed(format!("{e:#}")));
                 }
             })

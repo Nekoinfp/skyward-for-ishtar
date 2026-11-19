@@ -2972,7 +2972,10 @@ pub fn update(cx: &Ctx) -> Frame {
     let merging = l.pick(["更新合并", "更新合併", "Merging"]);
     y = if y == top { widgets::section_first(&mut c, t, f, y, merging) } else { widgets::section(&mut c, t, f, y, merging) };
     y = widgets::list(&mut c, t, f, y, &[row]).bottom;
-    if s.update == Standing::Waiting {
+    // Both kinds of update that wait to merge are offered the merge: the
+    // kernel-side kind and the compressed kind, which the daemon that serves
+    // it merges while the same page watches.
+    if matches!(s.update, Standing::Waiting | Standing::Compressed) {
         let (label, danger) = confirm_label(Confirm::Merge, cx.state);
         let track = widgets::confirm(&mut c, t, f, y + t.m.dp(28.0), label, danger, s.confirm);
         out.push(Hit { rect: track, action: Action::Confirm(Confirm::Merge) });
