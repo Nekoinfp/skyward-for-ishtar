@@ -16,9 +16,9 @@
 | --- | --- |
 | 镜像 | `skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img` |
 | 大小 | 104,857,600 字节（与底包 recovery 分区同尺寸） |
-| SHA-256 | `0054ebfaaa9d58bae058b1fd5ee2c25a4d1faea19da50f553a419f7d35d17d4e` |
-| 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,971,866 字节 |
-| 内含 recovery 本体 | 9,017,496 字节，AArch64 ELF（另含 `system/bin/snapuserd` 1,273,320 字节，读压缩快照用） |
+| SHA-256 | `7fe901e8e2cb762c2ed3ad19c5cab961ebcadb0ad3fc9ed7d3fb9b0d135a2a71` |
+| 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,987,038 字节 |
+| 内含 recovery 本体 | 9,044,496 字节，AArch64 ELF（另含 `system/bin/snapuserd` 1,273,320 字节，读压缩快照用） |
 | 底包 | OS4.0.4.0.XOACNXM，recovery 分区 SHA-256 `55f491052a360bc15362fd80c8bd2dd0912b289e1653f2bd7f9c5a12e7fea27b`（打包器自行核对） |
 
 结构审计（`tools/audit-image.py`）32 项全过：boot 头、ramdisk 解包为 newc 并以
@@ -464,3 +464,16 @@ skyward: the key service says a key needs an upgrade (...); asking it to renew t
 /sdcard          → DCIM、Documents、Download 等真实内容
 user 0 不再出现在"文件仍关着"的列表里（只剩 user 999）
 ```
+**更新页也能合并压缩更新了**（2026-11-20，未在真机验证）
+
+之前 `skyward merge --compressed` 只有命令行能用：更新页对压缩更新只显示一句"需在系统中合并"，
+没有可点的合并。现在：
+
+- 更新页在压缩更新（`Standing::Compressed`）时也显示合并滑块，文案改为
+  "由后台服务合并，启动系统后也会自动合并"；
+- 合并线程在**启动前**一次性判定走哪条路（`standing` 为 Compressed 且快照已映射
+  → `run_served`，否则走原内核路径），线程运行期间不再询问屏幕；
+- 仅**从页面发起**的合并可能走压缩路径：开机时发现已在合并的那次是系统自己驱动的，
+  保持只跟随、不接管。
+
+UI 测试 386 项全过（含新增"压缩更新同样滑动合并"）。
