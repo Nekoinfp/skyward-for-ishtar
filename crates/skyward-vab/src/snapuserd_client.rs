@@ -40,11 +40,12 @@ pub fn ensure_running() -> Result<()> {
     let daemon = CANDIDATES.iter().find(|path| Path::new(path).is_file()).with_context(|| {
         format!("no snapshot daemon: none of {CANDIDATES:?} is there")
     })?;
-    // `-user_snapshot` is what makes it serve compressed snapshots rather than
-    // the older in-kernel ones. It is left running: the device it serves needs
-    // it for as long as the device is mapped.
+    // Only the two flags the phone's own init gives it, so that nothing here
+    // differs from the daemon the system runs: `-user_snapshot` is what makes
+    // it serve compressed snapshots rather than the older in-kernel ones, and
+    // the worker count is left at its own default rather than capped.
     Command::new(daemon)
-        .args(["-user_snapshot", "-o_direct", "-worker_count=2"])
+        .args(["-user_snapshot", "-o_direct"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

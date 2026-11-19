@@ -3,7 +3,12 @@
 
 use anyhow::{bail, ensure, Context, Result};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::File;
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
 use std::sync::mpsc;
+#[cfg(unix)]
+use std::sync::Arc;
 use std::thread;
 
 const MAGIC: [u8; 4] = [0x3a, 0xff, 0x26, 0xed];
@@ -231,7 +236,145 @@ pub fn flash<R: Read + Seek + Send, W: Write + Seek>(input: &mut R, file_size: u
     })
 }
 
-/// Whether the bytes a sparse image expands to at `at` are `magic`.
+
+/// Write a sparse image into a file or block device with several writers at
+/// once, each filling a part of it it was given by offset rather than by
+/// taking turns.
+///
+/// The order in which the parts are written does not matter — every part has
+/// its own place — so the writes can go at the same time and the disk keeps
+/// its queue full. What does have to stay in order is the CRC32 over the
+/// expanded image, which is why the one thread reading the image is also the
+/// one that computes it.
+///
+/// Holes are not written at all: the device keeps what it holds there, exactly
+/// as [`flash`] leaves it.
+#[cfg(unix)]
+pub fn flash_into_file<R: Read + Seek + Send>(
+    input: &mut R,
+    file_size: u64,
+    out: &File,
+    workers: usize,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
+
+    let sparse = plan(input, file_size)?;
+    let expanded = sparse.len;
+    let workers = workers.max(1);
+    let (free_tx, free_rx) = mpsc::channel::<Vec<u8>>();
+    for _ in 0..(BUFFERS + workers) {
+        free_tx.send(Vec::with_capacity(BUFFER)).expect("new buffer queue");
+    }
+    let free_rx = Arc::new(Mutex::new(free_rx));
+    let (job_tx, job_rx) = mpsc::channel::<Option<(u64, Vec<u8>)>>();
+    let job_rx = Arc::new(Mutex::new(job_rx));
+    let done = Arc::new(AtomicU64::new(0));
+    let trouble: Arc<Mutex<Option<anyhow::Error>>> = Arc::new(Mutex::new(None));
+
+    thread::scope(|scope| -> Result<()> {
+        // The reader owns the only sender, so the writers stop when it stops.
+        let reading = scope.spawn(move || -> Result<()> {
+            let mut crc = crc32fast::Hasher::new();
+            let mut at = 0u64;
+            // Waits for a buffer a writer has finished with. Holding the lock
+            // while waiting is what makes it wait: writers return buffers
+            // through the other end, which needs no lock.
+            let fetch = || -> Option<Vec<u8>> {
+                let held = free_rx.lock().ok()?;
+                held.recv().ok()
+            };
+            for chunk in sparse.chunks {
+                match chunk {
+                    Chunk::Skip { len } => {
+                        write_zeroes(&mut crc, len);
+                        at += len;
+                    }
+                    Chunk::Crc(want) => {
+                        let got = crc.clone().finalize();
+                        if got != want {
+                            bail!("sparse CRC32 mismatch: expanded image has {got:08x}, not {want:08x}");
+                        }
+                        crc = crc32fast::Hasher::new();
+                    }
+                    Chunk::Raw { source, mut len } => {
+                        let mut consumed = 0u64;
+                        while len != 0 {
+                            let Some(mut bytes) = fetch() else { return Ok(()) };
+                            let n = len.min(BUFFER as u64) as usize;
+                            bytes.resize(n, 0);
+                            input.seek(SeekFrom::Start(source + consumed)).and_then(|_| input.read_exact(&mut bytes))
+                                .with_context(|| format!("read sparse raw chunk at {}", source + consumed))?;
+                            crc.update(&bytes);
+                            consumed += n as u64;
+                            len -= n as u64;
+                            let place = at;
+                            at += n as u64;
+                            if job_tx.send(Some((place, bytes))).is_err() { return Ok(()); }
+                        }
+                    }
+                    Chunk::Fill { pattern, mut len } => {
+                        let mut consumed = 0u64;
+                        while len != 0 {
+                            let Some(mut bytes) = fetch() else { return Ok(()) };
+                            let n = len.min(BUFFER as u64) as usize;
+                            bytes.resize(n, 0);
+                            for (i, b) in bytes.iter_mut().enumerate() { *b = pattern[(consumed as usize + i) % 4]; }
+                            crc.update(&bytes);
+                            consumed += n as u64;
+                            len -= n as u64;
+                            let place = at;
+                            at += n as u64;
+                            if job_tx.send(Some((place, bytes))).is_err() { return Ok(()) ; }
+                        }
+                    }
+                }
+            }
+            Ok(())
+        });
+
+        let writers: Vec<_> = (0..workers)
+            .map(|_| {
+                let (job_rx, free_tx, done, trouble) = (job_rx.clone(), free_tx.clone(), done.clone(), trouble.clone());
+                scope.spawn(move || {
+                    loop {
+                        let job = match job_rx.lock() {
+                            Ok(held) => held.recv(),
+                            Err(_) => break,
+                        };
+                        let Ok(Some((place, bytes))) = job else { break };
+                        if let Err(e) = out.write_all_at(&bytes, place) {
+                            let mut said = trouble.lock().expect("trouble");
+                            if said.is_none() { *said = Some(anyhow::Error::new(e).context("write sparse output")); }
+                            let _ = free_tx.send(bytes);
+                            break;
+                        }
+                        done.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                        let _ = free_tx.send(bytes);
+                    }
+                })
+            })
+            .collect();
+
+        // The page is told how far the write has come while it is going on, not
+        // only once it has ended.
+        let reader = reading;
+        while !reader.is_finished() {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            progress(done.load(Ordering::Relaxed), expanded);
+        }
+        let read_result = reader.join().map_err(|_| anyhow::anyhow!("sparse reader panicked"))?;
+        for writer in writers {
+            let _ = writer.join();
+        }
+        progress(done.load(Ordering::Relaxed), expanded);
+        if let Some(e) = trouble.lock().expect("trouble").take() {
+            return Err(e);
+        }
+        read_result
+    })
+}/// Whether the bytes a sparse image expands to at `at` are `magic`.
 ///
 /// A sparse super image keeps super's geometry past its first page, and one
 /// chunk covers that offset: read those four bytes without expanding the
@@ -481,6 +624,45 @@ mod tests {
         }
     }
 
+    /// Several writers filling different places come out exactly as one
+    /// writer going through in order, holes and all.
+    #[test]
+    fn several_writers_fill_the_same_bytes_as_one() {
+        const BLOCK: u32 = 4096;
+        let raw: Vec<u8> = (0..256 * BLOCK as usize).map(|i| (i % 251) as u8).collect();
+        let chunks: Vec<(u16, u32, Vec<u8>)> = vec![
+            (RAW, 256, raw.clone()),
+            (FILL, 512, vec![0x44, 0x33, 0x22, 0x11]),
+            (DONT_CARE, 128, Vec::new()),
+            (RAW, 256, raw),
+        ];
+        let bytes = sparse_of(BLOCK, &chunks, None);
+        let mut one = Cursor::new(Vec::new());
+        flash(&mut Cursor::new(&bytes), bytes.len() as u64, &mut one, &mut |_, _| {}).expect("one writer");
+        let one = one.into_inner();
+
+        let held = tempfile::NamedTempFile::new().expect("a file to write");
+        let file = std::fs::OpenOptions::new().write(true).open(held.path()).expect("open it");
+        let mut told = Vec::new();
+        flash_into_file(&mut Cursor::new(&bytes), bytes.len() as u64, &file, 3, &mut |done, of| told.push((done, of)))
+            .expect("three writers");
+        let several = std::fs::read(held.path()).expect("read it back");
+        assert_eq!(several, one, "the same bytes at the same places");
+        assert_eq!(told.last().map(|(_, of)| *of), Some(one.len() as u64), "the page ends where the image does");
+    }
+
+    /// A CRC that disagrees stops the write, however many writers there are.
+    #[test]
+    fn a_wrong_crc_stops_several_writers_too() {
+        const BLOCK: u32 = 4096;
+        let raw: Vec<u8> = vec![7u8; 4 * BLOCK as usize];
+        let chunks: Vec<(u16, u32, Vec<u8>)> = vec![(RAW, 4, raw)];
+        let bytes = sparse_of(BLOCK, &chunks, Some(0xdead_beef));
+        let held = tempfile::NamedTempFile::new().expect("a file to write");
+        let file = std::fs::OpenOptions::new().write(true).open(held.path()).expect("open it");
+        let error = flash_into_file(&mut Cursor::new(&bytes), bytes.len() as u64, &file, 4, &mut |_, _| {}).unwrap_err();
+        assert!(format!("{error:#}").contains("CRC32"), "{error:#}");
+    }
     #[test]
     fn a_device_that_stops_taking_bytes_fails_the_write_rather_than_hanging() {
         // Nine megabytes of one chunk, so it goes out in three buffers; the

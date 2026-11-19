@@ -299,6 +299,12 @@ fn has_partition(kind: ImageKind, dir: &Path, name: &str) -> Result<bool> {
 /// long one. A signed image smaller than its partition gets its footer moved
 /// to the partition's end, with zeros between, as fastboot does. `progress`
 /// hears the bytes written and read back so far, of all.
+/// How many writers to keep the device busy with: one per core there is, kept
+/// within reason, since more than a handful only queue up on one device.
+fn writers() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, 8)
+}
+
 pub fn flash<R: Read + Seek + Send>(image: &mut R, len: u64, devices: &[PathBuf], progress: &mut dyn FnMut(u64, u64)) -> Result<()> {
     flash_as(image, len, devices, Purpose::Partition, progress)
 }
@@ -345,7 +351,10 @@ fn flash_as<R: Read + Seek + Send>(
         for (index, (path, f, _)) in outs.iter_mut().enumerate() {
             let base = index as u64 * expanded;
             let mut meant = |done: u64, _of: u64| progress(base + done, expanded * slots);
-            crate::sparse::flash(image, len, f, &mut meant)?;
+            // Several writers at once, each taking the part of the image it
+            // was given by offset: the order the parts go down does not
+            // matter, and keeping the disk's queue full is the whole point.
+            crate::sparse::flash_into_file(image, len, f, writers(), &mut meant)?;
             f.sync_all().with_context(|| format!("flush {}", path.display()))?;
         }
         return Ok(());
