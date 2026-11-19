@@ -438,3 +438,28 @@ tools/collect-report.sh report.txt
 - 「配置里某个路径存在」证明的是**文件在**，不证明 HAL 能成功初始化——
   后者只能真机验证。
 - 镜像哈希只对应本机这次构建；从 CI 打出会不同（时间戳等），内容应一致。
+
+**`/data` 用户文件（CE）解密的修复**（2026-11-20，真机验证通过）
+
+现象：`/data` 能挂（DE 打开），但用户自己的文件始终关着。日志里的确切原因不是凭据：
+
+```
+the key service says a key needs an upgrade
+the key service still says a key needs an upgrade after it was started again:
+  start a decryption: the service refused the call with its error -62
+```
+
+`-62` 是 `KM_ERROR_KEY_REQUIRES_UPGRADE`：用户 synthetic password 的密钥是**旧系统版本**下生成的。原代码遇到它只做一件事——杀掉 keymint 重启再试**同一个密钥**，这对"密钥确实更旧"无效，所以永远第二次同样 -62。
+
+修复：**先真正调用 `upgradeKey`**（带密钥绑定的 app id，与 DE 路径早已在用的调用相同），用续期后的 blob 去开；只有续期被拒时才退回原来的重启重试。续期后的 blob **只留在内存**，不写回手机，系统读到的仍是原样。
+
+真机验证（输入 PIN 后）：
+
+```
+skyward: the key service says a key needs an upgrade (...); asking it to renew the key in hand
+（此后无任何失败行）
+
+/data/data       → 605 个条目，可读
+/sdcard          → DCIM、Documents、Download 等真实内容
+user 0 不再出现在"文件仍关着"的列表里（只剩 user 999）
+```
