@@ -370,7 +370,7 @@ partitions = 141 under /dev/block/by-name
 | sparse super 实际写盘 | 需要设备 |
 | ~~触摸是否真的能用~~ | **已验证（用户在有屏幕的机器上试过）**：触摸正常。界面渲染另已用 `skyward capture` 与离线预览比对，差异 6.66/255 |
 | ~~压缩快照的读取~~ | **已验证（2026-11-19）**：手机在系统里更新后产生 9 个 lz4 压缩的用户态快照；Skyward 在 B 槽把它们**全部挂载成功**，六个密钥服务全部注册 |
-| 压缩快照的合并 | **部分可行，未开启**。用 `skyward snapuserd --merge` 逐分区问过 daemon（`getstatus` 要用 `user_snapshot-<分区>` 这个名字，用分区名去问一律返回 failed，那是**名字找不到**而不是真的失败）：**COW 在 super 里的分区能合并完成**（`odm_b`），**COW 只在 `/metadata/gsi/ota/lp_metadata` 镜像里的八个分区停在 `snapshot-merge` 二十分钟不动**，daemon 空闲。最可能的原因是 `init` 第 5 段 `base_path_merge`——它是 daemon 合并时**按路径重新打开 base 设备**用的，现在传的是 dm 设备路径。实测退路可用：从这个半合并状态重启，**系统都在约一分钟内把剩下的合并完** |
+| 压缩快照的合并 | **新增 `skyward merge --compressed`（opt-in，默认仍拒绝）**：直接驱动 daemon 合并，逐分区用 `getstatus,user_snapshot-<分区>` 报真实状态，进度按"已完成分区数"计而不是 daemon 的全局百分比，完成后把 update 状态推到 `MergeCompleted`。**未经真机验证**（需要一次未合并的更新）。原有结论：用 `skyward snapuserd --merge` 逐分区问过 daemon（`getstatus` 要用 `user_snapshot-<分区>` 这个名字，用分区名去问一律返回 failed，那是**名字找不到**而不是真的失败）：**COW 在 super 里的分区能合并完成**（`odm_b`），**COW 只在 `/metadata/gsi/ota/lp_metadata` 镜像里的八个分区停在 `snapshot-merge` 二十分钟不动**，daemon 空闲。最可能的原因是 `init` 第 5 段 `base_path_merge`——它是 daemon 合并时**按路径重新打开 base 设备**用的，现在传的是 dm 设备路径。实测退路可用：从这个半合并状态重启，**系统都在约一分钟内把剩下的合并完** |
 | 非 A/B 更新包 | 未实现：xuanyuan 是 A/B 机型，此类包用不上；只加了"包声明了别的机型就拒绝"的安全门 |
 
 ---
