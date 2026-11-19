@@ -103,6 +103,10 @@ enum Cmd {
         /// Metadata slot: 0 for _a, 1 for _b. Defaults to the booted slot.
         #[arg(long)]
         slot: Option<u32>,
+        /// Plan growing a logical partition, as `name=bytes`, and say what it
+        /// would take. Nothing is written: the plan is what is shown.
+        #[arg(long)]
+        plan_grow: Option<String>,
     },
     /// Make a device-mapper device whose blocks are served from user space,
     /// look for the control device the kernel makes for it, and take it away
@@ -303,7 +307,7 @@ fn main() -> Result<()> {
         Cmd::Discard { device } => skyward_block::erase::discard(&device),
         #[cfg(target_os = "android")]
         Cmd::Mkfs { device, filesystem } => skyward_block::erase::make(&device, &filesystem, &[], false),
-        Cmd::Lp { super_dev, slot } => lp(&super_dev, slot),
+        Cmd::Lp { super_dev, slot, plan_grow } => lp(&super_dev, slot, plan_grow.as_deref()),
         #[cfg(target_os = "android")]
         Cmd::DmUser { name, sectors, params } => dm_user(&name, sectors, params.as_deref()),
         #[cfg(target_os = "android")]
@@ -775,7 +779,7 @@ fn dm_user(name: &str, sectors: u64, params: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn lp(super_dev: &Path, slot: Option<u32>) -> Result<()> {
+fn lp(super_dev: &Path, slot: Option<u32>, plan_grow: Option<&str>) -> Result<()> {
     let slot = match slot {
         Some(n) => n,
         None => booted_slot()?.number(),
@@ -815,6 +819,30 @@ fn lp(super_dev: &Path, slot: Option<u32>) -> Result<()> {
             }
             start = end + 1;
         }
+    }
+    // Only a plan, and nothing written: a partition may be grown as long as
+    // the room is there and no sector that is not its own is taken, which is
+    // worth seeing on this phone's own super before anything is changed.
+    if let Some(spec) = plan_grow {
+        let (name, wanted) = spec.split_once('=').with_context(|| format!("{spec} is not name=bytes"))?;
+        let wanted: u64 = wanted.trim().parse().with_context(|| format!("{wanted} is not a number of bytes"))?;
+        let before = md.partition(name).with_context(|| format!("super has no partition {name}"))?.bytes();
+        let mut grown = skyward_lp::grow_across(&[(md, name.to_string(), wanted)]).context("plan the growth")?;
+        let md = grown.pop().expect("the one metadata asked for");
+        let part = md.partition(name).cloned().with_context(|| format!("the plan has no {name}"))?;
+        println!("plan: {name} {before} -> {} bytes", part.bytes());
+        let mut start = 0;
+        for e in &part.extents {
+            let end = start + e.sectors() - 1;
+            match *e {
+                skyward_lp::Extent::Linear { device, sector, .. } => {
+                    println!("  {start} .. {end} linear {} {sector}", md.block_devices[device].partition_name);
+                }
+                skyward_lp::Extent::Zero { .. } => println!("  {start} .. {end} zero"),
+            }
+            start = end + 1;
+        }
+        println!("nothing was written");
     }
     Ok(())
 }
