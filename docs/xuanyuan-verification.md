@@ -255,23 +255,28 @@ recovery 里没有 `fb0`，但 `skyward capture` 从 `/dev/dri/card0` 读出整�
 **真机画面就是深色主页，与离线渲染同一页的差异只有 6.66/255**——渲染管线
 （DRM/KMS、字体、布局）与设计一致。
 
-**一条要注意的行为：`skyward data` 不是只读的**
+**更正：`skyward data` 并没有崩溃，之前的 "Aborted" 是我自己造成的**
+
+早先记录说它中止了。再跑一次、这回把输出写进文件而不是接 `| head`，结果是**成功**：
 
 ```
-Info: Automatic fix mode enabled.
-…
-Info: checkpoint stop reason: shutdown(229)
-Info: total FS sectors = 125098491 (488665 MB)
-Aborted
+Info: checkpoint state = 42 :  crc orphan_inodes sudden-power-off
+Info: No error was reported
+the check of /dev/block/dm-9 ended with 0
+/dev/block/dm-9 holds f2fs at /data
+user 0's own files stay closed
+user 999's own files stay closed
 ```
 
-它调用的是 `fsck.f2fs` 的**自动修复模式**（`-a`）——这正是 Android 自己在挂载带
-`check` 标志的文件系统时做的，所以这一段不是缺陷。随后 `fsck.f2fs` **自己中止了**
-（不是 Rust panic：`data` 路径里的 `unwrap`/`panic` 全在测试里）。离线无法定位，
-未修复，记在这里。
+那时我写的是 `skyward data 2>&1 | head -14`：`head` 读够 14 行就把管道关掉，
+进程写下一行时收到 SIGPIPE 而死，shell 就报 "Aborted"。**是观察方式的问题，不是程序的问题。**
 
-事后核过：系统能正常启动、`/data` 仍是 477G/366G（与之前完全一致）、
-`/data/media/0` 内容不变——**数据未受影响**。
+这次也顺带确认了它真正做的事：它调用的是 `fsck.f2fs -a`（自动修复模式）——
+这正是 Android 自己在挂载带 `check` 标志的文件系统时做的；然后**用元数据密钥把
+`/data` 挂起来，不需要用户凭据**，并如实说明用户自己的文件（CE）仍然关着。
+
+也就是说：**`/data` 的设备加密部分（DE）不用 PIN 就能读**
+（`/data`、`/data/media/0` 都可读），**用户 CE 存储要等凭据**。这两件事现在分开说清楚了。
 
 **`skyward check` 现在会直说数据分区开没开**（这一轮补上的）：
 
