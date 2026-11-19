@@ -22,6 +22,8 @@ mod filework;
 #[cfg(any(target_os = "android", test))]
 mod find;
 #[cfg(target_os = "android")]
+mod snapuserd;
+#[cfg(target_os = "android")]
 mod haptics;
 #[cfg(target_os = "android")]
 mod input;
@@ -119,6 +121,11 @@ enum Cmd {
         #[arg(long)]
         params: Option<String>,
     },
+    /// Start the phone's own snapshot daemon out of the installed system, ask
+    /// it whether it is serving, and stop it again. Nothing is mounted and
+    /// nothing is written.
+    #[cfg(target_os = "android")]
+    Snapuserd,
     /// Tell what a package or image is, the way the installer reads it.
     Identify { file: PathBuf },
     /// Discard all a block device holds and write zeros over its start, as
@@ -294,6 +301,8 @@ fn main() -> Result<()> {
         Cmd::Lp { super_dev, slot } => lp(&super_dev, slot),
         #[cfg(target_os = "android")]
         Cmd::DmUser { name, sectors, params } => dm_user(&name, sectors, params.as_deref()),
+        #[cfg(target_os = "android")]
+        Cmd::Snapuserd => snapuserd::probe(),
         Cmd::Update => update(),
         #[cfg(target_os = "android")]
         Cmd::Merge => {
