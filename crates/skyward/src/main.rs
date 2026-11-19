@@ -534,6 +534,11 @@ struct Gathered {
     /// read; a recovery that has not been given what it needs to unwrap the
     /// key leaves it closed.
     data_open: bool,
+    /// Each user and whether their own files are open, which is a different
+    /// question from the partition being open: the partition opens with the
+    /// key the phone keeps for it, and a user's files open behind their
+    /// credential, or behind the one the phone made up for them.
+    users: Vec<(u32, bool)>,
     /// Whether the table was read but said nothing about /data.
     said_nothing_about_data: bool,
     data_error: Option<String>,
@@ -619,6 +624,18 @@ fn report(g: &Gathered) -> String {
         true => "  the data partition: open, its files can be read\n",
         false => "  the data partition: closed, so nothing in it can be read yet\n",
     });
+    // The partition opening and a user's own files opening are two different
+    // things: the first needs the key the phone keeps for it, the second needs
+    // that user's credential, or the one the phone made up for them.
+    if !g.users.is_empty() {
+        let said = g
+            .users
+            .iter()
+            .map(|(id, open)| format!("{id} {}", if *open { "open" } else { "closed" }))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!("  the users' own files: {said}\n"));
+    }
 
     out.push_str("\nthe services the key chain needs\n");
     if g.services.is_empty() {
@@ -720,6 +737,22 @@ fn check(config: &Path) -> Result<()> {
         .filter_map(|s| s.ready_service.as_ref().map(|name| (name.clone(), services::registered(name))))
         .collect();
     g.data_open = skyward_block::mount::is_mount_point(std::path::Path::new("/data")).unwrap_or(false);
+    // A user whose files vold has opened has folders under their own
+    // directory; one whose credential nobody has given yet has an empty one.
+    g.users = std::fs::read_dir("/data/user")
+        .map(|entries| {
+            let mut users: Vec<(u32, bool)> = entries
+                .flatten()
+                .filter_map(|e| e.file_name().to_string_lossy().parse::<u32>().ok())
+                .map(|id| {
+                    let open = std::fs::read_dir(format!("/data/user/{id}")).map(|mut held| held.next().is_some()).unwrap_or(false);
+                    (id, open)
+                })
+                .collect();
+            users.sort_unstable();
+            users
+        })
+        .unwrap_or_default();
     match skyward_vab::snapshot_state() {
         Ok(state) => g.update = Some(format!("{state:?}")),
         Err(e) => g.update_error = Some(format!("{e:#}")),

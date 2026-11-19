@@ -16,6 +16,7 @@ fn gathered(line: &str) -> Gathered {
         tables: vec![("/vendor/etc/fstab.qcom", true), ("/odm/etc/fstab.qcom", false)],
         data: Some(entry(line)),
         data_open: true,
+        users: Vec::new(),
         key_dir: Some("/metadata/vold/metadata_encryption/key".into()),
         key_files: Some(vec![("key".into(), 64)]),
         read_through: Some("/dev/block/by-name/userdata".into()),
@@ -133,3 +134,15 @@ fn a_kept_log_gives_its_last_lines_and_leaves_the_blank_ones_out() {
         assert!(said.contains("metadata_encryption: aes-256-xts:wrappedkey_v0"), "the table is still reported: {said}");
         assert!(said.contains("registered: android.hardware.security.keymint"), "{said}");
     }
+/// Which users' own files are open is said apart from the partition being
+/// open, because it is a different question: the partition opens with the key
+/// the phone keeps, a user's files open behind that user's credential.
+#[test]
+fn the_users_whose_own_files_are_open_are_named_apart_from_those_that_are_not() {
+    let mut g = gathered(ENCRYPTED);
+    g.data_open = true;
+    g.users = vec![(0, true), (999, false)];
+    let text = report(&g);
+    assert!(text.contains("the users' own files: 0 open, 999 closed"), "{text}");
+    assert!(text.contains("the data partition: open"), "{text}");
+}
