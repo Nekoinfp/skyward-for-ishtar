@@ -98,6 +98,11 @@ enum Cmd {
         /// ramdisk, for the configuration to start.
         #[arg(long)]
         omapi: Option<PathBuf>,
+        /// The phone's own snapshot daemon, which serves the blocks of a
+        /// compressed snapshot. It has to be in the ramdisk: the partition it
+        /// is needed for is the system one, so it cannot be taken from there.
+        #[arg(long)]
+        snapuserd: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -159,7 +164,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, system_init, permissive_init, config, font, mono, mono_license, firmware, modules, omapi, out } => {
+        Cmd::Recovery { stock, binary, system_init, permissive_init, config, font, mono, mono_license, firmware, modules, omapi, snapuserd, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             let mut rd = Ramdisk::decode(&img.ramdisk)?;
@@ -212,6 +217,12 @@ fn main() -> Result<()> {
             // recovery starts it with the phone's other services.
             if let Some(stage) = &omapi {
                 install_omapi(&mut rd, stage, &read)?;
+            }
+            // Beside the recovery itself, where the mapping looks for it
+            // before any partition is mounted.
+            if let Some(daemon) = &snapuserd {
+                let bytes = std::fs::read(daemon).with_context(|| format!("read {}", daemon.display()))?;
+                rd.add("system/bin/snapuserd", 0o755, bytes)?;
             }
             // On an unlocked device adbd keeps root when ro.secure is 0 and
             // lets any computer in without authorization when ro.adb.secure is

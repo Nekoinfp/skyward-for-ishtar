@@ -527,11 +527,25 @@ pub fn map_snapshot(snaps: &Snapshots, md: &Metadata, devices: &[(u32, u32)], p:
             // reading is not, and that is what is done here.
             ensure!(!merge, "{}'s compressed snapshot is being merged, which this recovery does not drive", p.name);
             let misc = format!("user_snapshot-{}", p.name);
-            let sectors = crate::snapuserd_client::init_cow(&misc, &cow_dev, &base_dev, None)
-                .with_context(|| format!("give the snapshot daemon {}'s devices", p.name))?;
+            // The kernel's device is made first: this daemon attaches its
+            // workers to `/dev/dm-user/<name>` as it takes the copy-on-write
+            // device, and says "Could not open dm-user path" if that is not
+            // there yet. Its length is the snapshot's, which the status
+            // already says.
+            let sectors = status.snapshot_size / sector;
             let served = dm::create(&misc, &[dm::Target::DmUser { sectors, name: misc.clone(), partitions: 1 }], true)
                 .with_context(|| format!("make the device {misc} is served through"))?;
             made.push(misc.clone());
+            // This daemon takes five parts and calls anything else malformed:
+            // the message, the name, the copy-on-write device, what it reads
+            // through, and a path it can reopen that through by — which for a
+            // device is that device's own path.
+            let given = crate::snapuserd_client::init_cow(&misc, &cow_dev, &base_dev, Some(&base_dev))
+                .with_context(|| format!("give the snapshot daemon {}'s devices", p.name))?;
+            ensure!(
+                given == sectors || given == 0,
+                "the snapshot daemon made {misc} of {given} sectors, and its status says {sectors}"
+            );
             crate::snapuserd_client::start(&misc).with_context(|| format!("start {misc} being served"))?;
             return Ok(served);
         }

@@ -20,8 +20,11 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// Where the installed system keeps the daemon.
-pub const DAEMON: &str = "/mnt/system/system/bin/snapuserd";
+/// Where the daemon may be, the recovery's own first: it has to run before
+/// any partition is mounted, and a compressed snapshot is the system partition
+/// itself. The installed system's copy is the fallback, for a recovery
+/// carrying none of its own.
+pub const CANDIDATES: [&str; 2] = ["/system/bin/snapuserd", "/mnt/system/system/bin/snapuserd"];
 
 /// Where it listens.
 pub const SOCKET: &str = "/dev/socket/snapuserd";
@@ -34,23 +37,25 @@ pub fn ensure_running() -> Result<()> {
     if connect().is_ok() {
         return Ok(());
     }
-    ensure!(Path::new(DAEMON).is_file(), "{DAEMON} is not there: is the installed system mounted at /mnt/system?");
+    let daemon = CANDIDATES.iter().find(|path| Path::new(path).is_file()).with_context(|| {
+        format!("no snapshot daemon: none of {CANDIDATES:?} is there")
+    })?;
     // `-user_snapshot` is what makes it serve compressed snapshots rather than
     // the older in-kernel ones. It is left running: the device it serves needs
     // it for as long as the device is mapped.
-    Command::new(DAEMON)
+    Command::new(daemon)
         .args(["-user_snapshot", "-o_direct", "-worker_count=2"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .with_context(|| format!("start {DAEMON}"))?;
+        .with_context(|| format!("start {daemon}"))?;
     let until = Instant::now() + PATIENCE;
     loop {
         if connect().is_ok() {
             return Ok(());
         }
-        ensure!(Instant::now() < until, "{DAEMON} did not start listening within {} seconds", PATIENCE.as_secs());
+        ensure!(Instant::now() < until, "{daemon} did not start listening within {} seconds", PATIENCE.as_secs());
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -62,7 +67,11 @@ pub fn reachable() -> bool {
 
 /// Tell the daemon which copy-on-write device serves `misc`, and what it reads
 /// through, and give how many sectors the device it made has.
+///
+/// The daemon is started first if it is not serving: a recovery has no init
+/// script to start it, so the first device that needs it brings it up.
 pub fn init_cow(misc: &str, cow: &Path, backing: &Path, merge_target: Option<&Path>) -> Result<u64> {
+    ensure_running()?;
     let request = Request::Init {
         misc: misc.to_string(),
         cow: cow.display().to_string(),
