@@ -92,6 +92,26 @@ pub fn start(misc: &str) -> Result<()> {
     }
 }
 
+/// Tell the daemon to begin merging `misc` into the partition it stands for.
+///
+/// Merging a compressed snapshot is the daemon's own work: the kernel's
+/// `snapshot-merge` target never sees such a device, and the blocks have to be
+/// decompressed on the way into the partition.
+pub fn initiate_merge(misc: &str) -> Result<()> {
+    match exchange(&Request::InitiateMerge { misc: misc.to_string() })? {
+        Reply::Done => Ok(()),
+        other => bail!("the daemon answered {other:?} rather than beginning to merge {misc}"),
+    }
+}
+
+/// How far the merge has come, as a percentage of the whole.
+pub fn merge_percent() -> Result<f64> {
+    match exchange(&Request::MergePercent)? {
+        Reply::Percent(percent) => Ok(percent),
+        other => bail!("the daemon answered {other:?} rather than how far the merge has come"),
+    }
+}
+
 /// Ask the daemon whether it is serving.
 pub fn query() -> Result<Reply> {
     exchange(&Request::Query)

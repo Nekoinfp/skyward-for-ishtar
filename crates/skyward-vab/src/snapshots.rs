@@ -522,11 +522,11 @@ pub fn map_snapshot(snaps: &Snapshots, md: &Metadata, devices: &[(u32, u32)], p:
         };
         let kind = if merge { "snapshot-merge" } else { "snapshot" };
         if userspace {
-            // Merging writes into the partition as it goes, and has to be the
-            // daemon's own work with the copy-on-write device in its hands;
-            // reading is not, and that is what is done here.
-            ensure!(!merge, "{}'s compressed snapshot is being merged, which this recovery does not drive", p.name);
-            let misc = format!("user_snapshot-{}", p.name);
+            // Merging or not changes nothing about how the device is made: a
+            // compressed snapshot is merged by the daemon that serves it, and
+            // the mapping stays the same either way.
+            let _ = merge;
+            let misc = served_name(&p.name);
             // The kernel's device is made first: this daemon attaches its
             // workers to `/dev/dm-user/<name>` as it takes the copy-on-write
             // device, and says "Could not open dm-user path" if that is not
@@ -566,6 +566,12 @@ pub fn map_snapshot(snaps: &Snapshots, md: &Metadata, devices: &[(u32, u32)], p:
     mapped
 }
 
+/// The name the daemon and the kernel's user-space device are known by for
+/// partition `name`, which is also its control device under `/dev/dm-user/`.
+pub fn served_name(name: &str) -> String {
+    format!("user_snapshot-{name}")
+}
+
 /// How a look at a merge left it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Merge {
@@ -594,7 +600,7 @@ pub fn initiate(snaps: &Snapshots, current: Slot, md: &Metadata, tell: &dyn Fn(M
     let mut update = snaps.update()?;
     ensure!(state_of(&update)? == UpdateState::Unverified, "the update has not been written all the way, or is merging already");
     ensure!(snaps.side(current)? == Side::Target, "the phone runs from the slot the update came from, not the one it went to");
-    ensure!(!update.using_snapuserd, "the update's snapshots are compressed and served by snapuserd, which this recovery does not run");
+    let userspace = update.using_snapuserd;
     let mut names = snaps.list()?;
     for name in names.iter().filter(|n| n.ends_with(current.suffix())) {
         ensure!(dm::status(name)?.is_some(), "{name} is not mapped, and everything has to merge at once");
@@ -615,7 +621,7 @@ pub fn initiate(snaps: &Snapshots, current: Slot, md: &Metadata, tell: &dyn Fn(M
         initial.total += usage.total;
         initial.metadata += usage.metadata;
         let status = snaps.status(name)?;
-        ensure!(!status.using_snapuserd, "{name}'s snapshot is compressed and served by snapuserd, which this recovery does not run");
+
         if status.phase() == MergePhase::FirstPhase {
             first.push(name.clone());
         }
@@ -633,6 +639,21 @@ pub fn initiate(snaps: &Snapshots, current: Slot, md: &Metadata, tell: &dyn Fn(M
     };
     // From here every snapshot taken in has to merge.
     snaps.write_update(&update, tell)?;
+    if userspace {
+        // A compressed snapshot is merged by the daemon that serves it; the
+        // kernel's snapshot-merge target never sees such a device.
+        let mut failed = false;
+        for name in &group {
+            let served = served_name(name);
+            if crate::snapuserd_client::initiate_merge(&served).is_err() {
+                failed = true;
+            }
+        }
+        if failed {
+            snaps.set_state(UpdateState::MergeFailed, FailureCode::ActivateNewTable, tell)?;
+        }
+        return Ok(());
+    }
     let mut failure = FailureCode::Ok;
     for name in &group {
         if let Err(code) = switch_to_merge(snaps, name) {
@@ -690,7 +711,15 @@ pub fn check(snaps: &Snapshots, current: Slot, md: &Metadata, devices: &[(u32, u
         }
         other => return Ok(Merge::Idle(other)),
     }
-    ensure!(!update.using_snapuserd, "the update's snapshots are compressed and served by snapuserd, which this recovery does not run");
+    if update.using_snapuserd {
+        // The daemon merges, and it alone knows how far it has come.
+        let percent = crate::snapuserd_client::merge_percent()?;
+        if percent >= 100.0 {
+            snaps.set_state(UpdateState::MergeCompleted, FailureCode::Ok, tell)?;
+            return Ok(Merge::Done);
+        }
+        return Ok(Merge::Going((percent / 100.0).clamp(0.0, 1.0)));
+    }
     let (mut merging, mut needs_reboot, mut wrong_phase, mut cancelled) = (false, false, false, false);
     let mut failure = FailureCode::Ok;
     for name in snaps.list()?.iter().filter(|n| n.ends_with(current.suffix())) {
