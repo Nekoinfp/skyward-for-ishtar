@@ -102,6 +102,23 @@ enum Cmd {
         #[arg(long)]
         slot: Option<u32>,
     },
+    /// Make a device-mapper device whose blocks are served from user space,
+    /// look for the control device the kernel makes for it, and take it away
+    /// again. Nothing is read from it and nothing is written: this only says
+    /// whether this kernel serves a compressed snapshot through `dm-user`.
+    #[cfg(target_os = "android")]
+    DmUser {
+        /// The name the kernel's misc device is made under, as the
+        /// snapuserd that would serve it is told.
+        name: String,
+        /// How long the device is, in sectors. Nothing reads it here.
+        #[arg(long, default_value_t = 8)]
+        sectors: u64,
+        /// The parameters as the target takes them, when the shape this
+        /// module writes is not the one the kernel accepts.
+        #[arg(long)]
+        params: Option<String>,
+    },
     /// Tell what a package or image is, the way the installer reads it.
     Identify { file: PathBuf },
     /// Discard all a block device holds and write zeros over its start, as
@@ -275,6 +292,8 @@ fn main() -> Result<()> {
         #[cfg(target_os = "android")]
         Cmd::Mkfs { device, filesystem } => skyward_block::erase::make(&device, &filesystem, &[], false),
         Cmd::Lp { super_dev, slot } => lp(&super_dev, slot),
+        #[cfg(target_os = "android")]
+        Cmd::DmUser { name, sectors, params } => dm_user(&name, sectors, params.as_deref()),
         Cmd::Update => update(),
         #[cfg(target_os = "android")]
         Cmd::Merge => {
@@ -697,6 +716,42 @@ fn what_the_services_said() -> Vec<(String, Vec<String>)> {
             Some((log.display().to_string(), kept_lines(&text)))
         })
         .collect()
+}
+
+/// Make a device whose blocks come from user space and take it away again,
+/// saying what the kernel made of it.
+///
+/// A compressed snapshot is read through such a device: the kernel sends each
+/// request to the program listening at `/dev/dm-user/<name>`, and that
+/// program — the phone's `snapuserd` — answers with the blocks. Whether this
+/// kernel has the target at all, and what it makes of a table naming it, is
+/// the first thing that has to be known before any of that can be relied on.
+#[cfg(target_os = "android")]
+fn dm_user(name: &str, sectors: u64, params: Option<&str>) -> Result<()> {
+    anyhow::ensure!(!name.is_empty() && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-'), "{name} is not a name a device may have");
+    // The target is registered as "user"; "/dev/dm-user/<name>" is the misc
+    // device the kernel makes for it, and where the requests go. Asked for
+    // "dm-user" the kernel knows nothing, which is worth telling apart.
+    match skyward_block::dm::target_version("user").context("ask the kernel for its user target")? {
+        Some([major, minor, patch]) => println!("the kernel's target is \"user\" {major}.{minor}.{patch}"),
+        None => println!("the kernel has no \"user\" target, so nothing can be served from user space"),
+    }
+    let target = match params {
+        Some(given) => {
+            println!("trying the parameters as given: {given}");
+            skyward_block::dm::Target::Raw { sectors, kind: "user".into(), params: given.to_string() }
+        }
+        None => skyward_block::dm::Target::DmUser { sectors, name: name.to_string(), partitions: 1 },
+    };
+    let device = skyward_block::dm::create(name, std::slice::from_ref(&target), true).context("make a device served from user space")?;
+    println!("made {} ({sectors} sectors)", device.display());
+    // The kernel makes a misc device named after the target as it creates
+    // this one, and the program that serves it listens there.
+    let control = Path::new("/dev/dm-user").join(name);
+    println!("{}: {}", control.display(), if control.exists() { "there" } else { "not there" });
+    skyward_block::dm::remove(name).with_context(|| format!("take {name} away"))?;
+    println!("took {name} away again");
+    Ok(())
 }
 
 fn lp(super_dev: &Path, slot: Option<u32>) -> Result<()> {

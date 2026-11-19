@@ -23,6 +23,16 @@ pub enum Target {
     /// kernel writes the changes into `base` as it goes. `overflow` has the
     /// kernel say when `cow` runs out, where its target can.
     Snapshot { sectors: u64, base: (u32, u32), cow: (u32, u32), merge: bool, overflow: bool },
+    /// `sectors` sectors served from user space: the kernel sends each
+    /// request over `/dev/dm-user/<name>` to the program listening there, and
+    /// that program answers with the blocks. This is how a compressed
+    /// snapshot is read, the phone's `snapuserd` being that program.
+    /// `partitions` is how many instances of it one device serves, which the
+    /// kernel names in the message it sends.
+    DmUser { sectors: u64, name: String, partitions: u32 },
+    /// A target given by its kind and its parameters as the kernel takes
+    /// them, for the ones this module has no shape of its own for.
+    Raw { sectors: u64, kind: String, params: String },
 }
 
 /// The chunk an update's snapshots keep their changes in, in sectors.
@@ -34,17 +44,21 @@ impl Target {
             Target::Linear { sectors, .. }
             | Target::Zero { sectors }
             | Target::DefaultKey { sectors, .. }
-            | Target::Snapshot { sectors, .. } => *sectors,
+            | Target::Snapshot { sectors, .. }
+            | Target::DmUser { sectors, .. }
+            | Target::Raw { sectors, .. } => *sectors,
         }
     }
 
-    fn kind(&self) -> &'static str {
+    fn kind(&self) -> &str {
         match self {
             Target::Linear { .. } => "linear",
             Target::Zero { .. } => "zero",
             Target::DefaultKey { .. } => "default-key",
             Target::Snapshot { merge: false, .. } => "snapshot",
             Target::Snapshot { merge: true, .. } => "snapshot-merge",
+            Target::DmUser { .. } => "user",
+            Target::Raw { kind, .. } => kind,
         }
     }
 
@@ -63,6 +77,14 @@ impl Target {
                 let mode = if *overflow { "PO" } else { "P" };
                 format!("{bmaj}:{bmin} {cmaj}:{cmin} {mode} {SNAPSHOT_CHUNK}")
             }
+            // The kernel's `user_ctr` counts three arguments and refuses any
+            // other number, but reads only the last of them: the name under
+            // which it registers `dm-user/<name>`. The two before it are
+            // written as zero, which nothing in the driver looks at — tried
+            // on the phone, where `0 1 <name>` and `1 0 <name>` both make the
+            // same device and `<name> 1 0` makes one called `0`.
+            Target::DmUser { name, .. } => format!("0 0 {name}"),
+            Target::Raw { params, .. } => params.clone(),
         }
     }
 }
@@ -468,6 +490,20 @@ mod tests {
         assert_eq!((second.sector_start, second.length), (4_078_120, 8));
         assert_eq!(&second.target_type[..5], b"zero\0");
         assert_eq!((second.next, tail.len()), (48, 8));
+    }
+
+    /// The kernel's `dm_user_ctr` counts its arguments and refuses anything
+    /// but two: the name of its misc device, and how many partitions the
+    /// The kernel's `user_ctr` refuses any count but three, and takes the name
+    /// of its misc device from the last of them. A compressed snapshot is read
+    /// through this target, so the line has to be that.
+    #[test]
+    fn a_user_space_target_names_its_device_in_the_last_of_three() {
+        let user = Target::DmUser { sectors: 1_780_392, name: "system_a".into(), partitions: 1 };
+        assert_eq!(user.kind(), "user");
+        assert_eq!(user.params(), "0 0 system_a", "three arguments, the name the last and the only one read");
+        assert_eq!(user.sectors(), 1_780_392);
+        assert_eq!(user.params().split(' ').count(), 3, "the kernel refuses any other count");
     }
 
     #[test]
