@@ -117,6 +117,18 @@ pub fn query() -> Result<Reply> {
     exchange(&Request::Query)
 }
 
+/// Send `text` exactly as given and give what comes back, for the messages
+/// that have no shape of their own here: `getstatus`, `pause_merge` and
+/// whatever else the daemon grows.
+pub fn ask(text: &str) -> Result<String> {
+    let mut stream = connect().context("reach the snapshot daemon")?;
+    stream.write_all(text.as_bytes()).with_context(|| format!("send {text:?}"))?;
+    let mut held = [0u8; 256];
+    let read = stream.read(&mut held).with_context(|| format!("read the answer to {text:?}"))?;
+    ensure!(read > 0, "the daemon closed the connection rather than answering {text:?}");
+    Ok(String::from_utf8_lossy(&held[..read]).into_owned())
+}
+
 fn exchange(request: &Request) -> Result<Reply> {
     let mut stream = connect().context("reach the snapshot daemon")?;
     let text = request.text();

@@ -125,7 +125,12 @@ enum Cmd {
     /// it whether it is serving, and stop it again. Nothing is mounted and
     /// nothing is written.
     #[cfg(target_os = "android")]
-    Snapuserd,
+    Snapuserd {
+        /// Begin merging what it serves, and watch how far each partition
+        /// comes while it does.
+        #[arg(long)]
+        merge: bool,
+    },
     /// Tell what a package or image is, the way the installer reads it.
     Identify { file: PathBuf },
     /// Discard all a block device holds and write zeros over its start, as
@@ -302,7 +307,7 @@ fn main() -> Result<()> {
         #[cfg(target_os = "android")]
         Cmd::DmUser { name, sectors, params } => dm_user(&name, sectors, params.as_deref()),
         #[cfg(target_os = "android")]
-        Cmd::Snapuserd => snapuserd::probe(),
+        Cmd::Snapuserd { merge } => if merge { snapuserd::diagnose(true) } else { snapuserd::probe() },
         Cmd::Update => update(),
         #[cfg(target_os = "android")]
         Cmd::Merge => {

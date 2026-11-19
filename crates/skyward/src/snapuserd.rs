@@ -125,3 +125,47 @@ fn hear(stream: &mut UnixStream) -> Result<Reply> {
     ensure!(read > 0, "the daemon closed the connection rather than answering");
     Ok(Reply::parse(&String::from_utf8_lossy(&held[..read])))
 }
+
+/// What the daemon says about each snapshot it serves, and — when asked — what
+/// it says while merging them.
+///
+/// The global `merge_percent` only says how far the lot has come; the per
+/// partition `getstatus` is what names a partition that has stopped.
+pub fn diagnose(merge: bool) -> Result<()> {
+    ensure!(skyward_vab::snapuserd_client::reachable(), "the snapshot daemon is not serving: is anything mapped?");
+    let names = std::fs::read_dir("/metadata/ota/snapshots")
+        .context("read the snapshots the update left")?
+        .filter_map(|entry| entry.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .collect::<Vec<_>>();
+    for name in &names {
+        let said = skyward_vab::snapuserd_client::ask(&format!("getstatus,user_snapshot-{name}")).unwrap_or_else(|e| format!("<{e}>"));
+        println!("  {name:24} {said}");
+    }
+    println!("  overall merge: {}", skyward_vab::snapuserd_client::ask("merge_percent").unwrap_or_else(|e| e.to_string()));
+    if !merge {
+        return Ok(());
+    }
+    for name in &names {
+        let misc = format!("user_snapshot-{name}");
+        let said = skyward_vab::snapuserd_client::ask(&format!("initiate_merge,{misc}")).unwrap_or_else(|e| format!("<{e}>"));
+        println!("initiate {misc}: {said}");
+    }
+    for round in 0..24 {
+        std::thread::sleep(Duration::from_secs(5));
+        let percent = skyward_vab::snapuserd_client::ask("merge_percent").unwrap_or_else(|e| e.to_string());
+        let mut done = 0;
+        let mut failed = Vec::new();
+        for name in &names {
+            match skyward_vab::snapuserd_client::ask(&format!("getstatus,user_snapshot-{name}")) {
+                Ok(said) if said.contains("complete") => done += 1,
+                Ok(said) => failed.push(format!("{name}={said}")),
+                Err(e) => failed.push(format!("{name}=<{e}>")),
+            }
+        }
+        println!("  [{}] merge {percent}, complete {done}/{}, {}", round * 5 + 5, names.len(), failed.join(" "));
+        if done == names.len() {
+            break;
+        }
+    }
+    Ok(())
+}
