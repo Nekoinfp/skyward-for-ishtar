@@ -156,7 +156,12 @@ enum Cmd {
     /// Merge the update into the slot the phone runs from, starting the
     /// merge where it has not begun, and follow it to its end.
     #[cfg(target_os = "android")]
-    Merge,
+    Merge {
+        /// Merge an update whose snapshots are compressed, which only the
+        /// daemon that serves them can do.
+        #[arg(long)]
+        compressed: bool,
+    },
     /// Keep the configuration's services that this phone runs going until
     /// stopped.
     #[cfg(target_os = "android")]
@@ -314,7 +319,7 @@ fn main() -> Result<()> {
         Cmd::Snapuserd { merge } => if merge { snapuserd::diagnose(true) } else { snapuserd::probe() },
         Cmd::Update => update(),
         #[cfg(target_os = "android")]
-        Cmd::Merge => {
+        Cmd::Merge { compressed } => {
             let slot = booted_slot()?;
             // A compressed snapshot merges in the daemon that serves it, and
             // starts there too: `Waiting` is the kernel's kind, `Compressed`
@@ -324,7 +329,15 @@ fn main() -> Result<()> {
                 skyward_vab::standing(slot)?,
                 skyward_vab::Standing::Waiting | skyward_vab::Standing::Compressed
             );
-            let end = merge::run(slot, start, &mut |m| println!("{m:?}"))?;
+            let end = if compressed {
+                // An update whose snapshots are compressed is merged by the
+                // daemon that serves them, never by the kernel.
+                merge::run_served(slot, &mut |m| println!("{m:?}"), &mut |name, said, share| {
+                    println!("  {name:24} {said}  ({:.0}% of the snapshots done)", share * 100.0);
+                })?
+            } else {
+                merge::run(slot, start, &mut |m| println!("{m:?}"))?
+            };
             println!("ended {end:?}");
             Ok(())
         }

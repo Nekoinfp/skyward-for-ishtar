@@ -42,6 +42,25 @@ pub fn run(slot: Slot, start: bool, each: &mut dyn FnMut(&Merge)) -> Result<Merg
     Ok(merge)
 }
 
+/// Merge an update whose snapshots are compressed, through the daemon that
+/// serves them. `/metadata` is writable while it runs, and read-only again
+/// after; `each` is told how every look at it went, and `watch` what the
+/// daemon says of each snapshot by name.
+pub fn run_served(slot: Slot, each: &mut dyn FnMut(&Merge), watch: &mut dyn FnMut(&str, &str, f64)) -> Result<Merge> {
+    let (binder, hardware) = (Binder::open()?, Binder::hardware()?);
+    let control = BootControl::open(&binder, &hardware)?;
+    let tell = |status| control.set_merge_status(status);
+    skyward_vab::metadata_writable(true).context("make /metadata writable to merge the update")?;
+    let merged = (|| -> Result<Merge> {
+        let snaps = skyward_vab::snapshots::Snapshots::lock(true)?.context("no update was ever applied")?;
+        skyward_vab::snapshots::merge_served(&snaps, slot, &tell, watch)
+    })();
+    let back = skyward_vab::metadata_writable(false).context("make /metadata read-only again");
+    let merge = merged?;
+    each(&merge);
+    back?;
+    Ok(merge)
+}
 pub enum Event {
     /// How a look at the merge went.
     Looked(Merge),

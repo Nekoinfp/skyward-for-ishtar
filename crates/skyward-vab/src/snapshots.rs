@@ -574,6 +574,64 @@ pub fn served_name(name: &str) -> String {
     format!("user_snapshot-{name}")
 }
 
+/// How long a merge through the daemon is followed before it is given up on.
+const SERVED_PATIENCE: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+
+/// Have the daemon that serves compressed snapshots merge them, and follow it
+/// until every one of them says it has merged or it stops getting anywhere.
+///
+/// A compressed snapshot is merged by that daemon and never by the kernel's
+/// `snapshot-merge` target, so there is no table to switch: the daemon is told
+/// to begin, and then asked about each snapshot by the name it knows it under.
+/// `watch` is told each snapshot's own word and the share of them now done,
+/// which is the only honest progress there is — the daemon's own percentage is
+/// over the snapshots it happens to have started, not over all of them.
+pub fn merge_served(
+    snaps: &Snapshots,
+    current: Slot,
+    tell: &dyn Fn(MergeStatus) -> Result<()>,
+    watch: &mut dyn FnMut(&str, &str, f64),
+) -> Result<Merge> {
+    let update = snaps.update()?;
+    ensure!(update.using_snapuserd, "the update's snapshots are not compressed");
+    let names: Vec<String> = snaps.list()?.into_iter().filter(|n| n.ends_with(current.suffix())).collect();
+    ensure!(!names.is_empty(), "the update names no snapshots to merge");
+    match state_of(&update)? {
+        UpdateState::Merging | UpdateState::MergeNeedsReboot | UpdateState::MergeFailed => {}
+        _ => snaps.set_state(UpdateState::Merging, FailureCode::Ok, tell)?,
+    }
+    for name in &names {
+        // One that has merged already says so rather than beginning again.
+        let _ = crate::snapuserd_client::initiate_merge(&served_name(name));
+    }
+    let patience = std::time::Instant::now() + SERVED_PATIENCE;
+    loop {
+        let (mut done, mut trouble) = (0usize, None);
+        for name in &names {
+            let said = crate::snapuserd_client::ask(&format!("getstatus,{}", served_name(name))).unwrap_or_default();
+            if said.contains("complete") {
+                done += 1;
+            } else if said.contains("failed") {
+                trouble = Some(name.clone());
+            }
+            watch(name, &said, done as f64 / names.len() as f64);
+        }
+        if done == names.len() {
+            snaps.set_state(UpdateState::MergeCompleted, FailureCode::Ok, tell)?;
+            return Ok(Merge::Done);
+        }
+        if let Some(name) = trouble {
+            snaps.set_state(UpdateState::MergeFailed, FailureCode::QuerySnapshotStatus, tell)?;
+            bail!("{name} says its merge failed");
+        }
+        ensure!(
+            std::time::Instant::now() < patience,
+            "the daemon stopped getting anywhere: {done} of {} merged",
+            names.len()
+        );
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
 /// How a look at a merge left it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Merge {
