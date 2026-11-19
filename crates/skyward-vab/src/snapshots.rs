@@ -574,6 +574,39 @@ pub fn served_name(name: &str) -> String {
     format!("user_snapshot-{name}")
 }
 
+/// What one snapshot's own answer about its merge amounts to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Served {
+    /// It says the merge is finished.
+    Done,
+    /// It says it is merging, or says something this program does not know.
+    Going,
+    /// It says the merge failed.
+    Failed,
+}
+
+/// Read what the daemon answered for one snapshot.
+///
+/// The answers are `snapshot-merge-complete`, `snapshot-merge` while it is
+/// still going, and `snapshot-merge-failed`. The longer ones are looked for
+/// first because they contain the shorter one: read the other way round,
+/// `snapshot-merge-complete` would be taken for a merge still running.
+///
+/// Anything else — an empty answer, a name the daemon has no handler for, a
+/// connection that went away — is not a failure and not a finish: it is read
+/// as still going, so that a daemon that has not answered yet is given the
+/// patience it was promised rather than being declared failed at once.
+pub fn served_verdict(said: &str) -> Served {
+    const DONE: &str = "snapshot-merge-complete";
+    const FAILED: &str = "snapshot-merge-failed";
+    if said.trim() == DONE {
+        Served::Done
+    } else if said.trim() == FAILED {
+        Served::Failed
+    } else {
+        Served::Going
+    }
+}
 /// How long a merge through the daemon is followed before it is given up on.
 const SERVED_PATIENCE: std::time::Duration = std::time::Duration::from_secs(20 * 60);
 
@@ -594,8 +627,16 @@ pub fn merge_served(
 ) -> Result<Merge> {
     let update = snaps.update()?;
     ensure!(update.using_snapuserd, "the update's snapshots are not compressed");
+    ensure!(snaps.side(current)? == Side::Target, "the phone runs from the slot the update came from, not the one it went to");
     let names: Vec<String> = snaps.list()?.into_iter().filter(|n| n.ends_with(current.suffix())).collect();
     ensure!(!names.is_empty(), "the update names no snapshots to merge");
+    // Merging writes into each partition through the device that serves it,
+    // so every one of them has to be there before any of them begins: half a
+    // merge is worse than none.
+    for name in &names {
+        let served = served_name(name);
+        ensure!(dm::status(&served)?.is_some(), "{served} is not mapped, and everything has to merge at once");
+    }
     match state_of(&update)? {
         UpdateState::Merging | UpdateState::MergeNeedsReboot | UpdateState::MergeFailed => {}
         _ => snaps.set_state(UpdateState::Merging, FailureCode::Ok, tell)?,
@@ -609,10 +650,10 @@ pub fn merge_served(
         let (mut done, mut trouble) = (0usize, None);
         for name in &names {
             let said = crate::snapuserd_client::ask(&format!("getstatus,{}", served_name(name))).unwrap_or_default();
-            if said.contains("complete") {
-                done += 1;
-            } else if said.contains("failed") {
-                trouble = Some(name.clone());
+            match served_verdict(&said) {
+                Served::Done => done += 1,
+                Served::Failed => trouble = Some(name.clone()),
+                Served::Going => {}
             }
             watch(name, &said, done as f64 / names.len() as f64);
         }
@@ -931,6 +972,26 @@ fn merge_second_phase(snaps: &Snapshots, current: Slot) -> FailureCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The three answers this phone's own daemon gave, read the right way
+    /// round: the finished one contains the one that means still going.
+    #[test]
+    fn a_snapshot_says_which_of_three_things_about_its_merge() {
+        assert_eq!(served_verdict("snapshot-merge-complete"), Served::Done);
+        assert_eq!(served_verdict("snapshot-merge"), Served::Going);
+        assert_eq!(served_verdict("snapshot-merge-failed"), Served::Failed);
+        assert_eq!(served_verdict("snapshot-merge-complete\n"), Served::Done, "a trailing newline is not a different answer");
+    }
+
+    /// Whatever else comes back is not a failure: a daemon that has not
+    /// answered yet, or a name it knows nothing of, gets the patience it was
+    /// promised instead of being counted as done or as broken.
+    #[test]
+    fn an_answer_that_is_not_one_of_the_three_is_read_as_still_going() {
+        for said in ["", "fail", "active", "snapshot-merge-complete-ish", "unknown"] {
+            assert_eq!(served_verdict(said), Served::Going, "{said:?}");
+        }
+    }
 
     #[test]
     fn a_snapshots_status_line_is_read_as_the_kernel_writes_it() {
