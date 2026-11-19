@@ -739,13 +739,19 @@ fn check(config: &Path) -> Result<()> {
     g.data_open = skyward_block::mount::is_mount_point(std::path::Path::new("/data")).unwrap_or(false);
     // A user whose files vold has opened has folders under their own
     // directory; one whose credential nobody has given yet has an empty one.
+    // Whether a user's own files are open is not a matter of the folder
+    // having anything in it: it is whether the key that folder is encrypted
+    // with is in the kernel, which is what the kernel itself is asked rather
+    // than guessed from a listing. The owner's files are the ones under
+    // /data/data; another user's are their own folder.
     g.users = std::fs::read_dir("/data/user")
         .map(|entries| {
             let mut users: Vec<(u32, bool)> = entries
                 .flatten()
                 .filter_map(|e| e.file_name().to_string_lossy().parse::<u32>().ok())
                 .map(|id| {
-                    let open = std::fs::read_dir(format!("/data/user/{id}")).map(|mut held| held.next().is_some()).unwrap_or(false);
+                    let dir = if id == 0 { std::path::PathBuf::from("/data/data") } else { std::path::PathBuf::from(format!("/data/user/{id}")) };
+                    let open = skyward_crypto::fscrypt::unlocked(&dir).unwrap_or(false);
                     (id, open)
                 })
                 .collect();
