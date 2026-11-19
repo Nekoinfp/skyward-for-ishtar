@@ -119,7 +119,52 @@ daemon 由 init 启动（`ctl.start=snapuserd`），就绪属性 `snapuserd.read
   所以用两个枚举按方向解读，而不是一个整数加注释；
 - `Request` / `Reply`：13 条控制消息与回复的文本编解码，未知消息**报错而非静默丢弃**。
 
-写这些时**没有真机**，因为全是纯值；接线（打开 dm-user、启动 daemon、驱动合并）才是需要设备的下一步。
+**5. 内核侧已经在真机上打通**（`skyward dm-user <名字>`）
+
+三条都是**实测**出来的，不是从文档抄的：
+
+| 事实 | 怎么知道的 |
+| --- | --- |
+| target 名是 **`user`**，不是 `dm-user` | 问 `dm-user` 内核说没有；问 `user` 答 **1.0.0** |
+| 参数**必须是 3 个** | 给 2 个，内核日志写 `user: Invalid argument count (-EINVAL)` |
+| 名字取自**第 3 个**参数 | `0 1 name` 与 `1 0 name` 都建出 `/dev/dm-user/name`；`name 1 0` 建出的是 `/dev/dm-user/0` |
+
+所以现在写的是 `0 0 <名字>`（前两个内核根本不读，填 0 并注明）。实测输出：
+
+```
+the kernel's target is "user" 1.0.0
+made /dev/block/dm-10 (8 sectors)
+/dev/dm-user/skywardprobe2: there
+took skywardprobe2 away again
+```
+
+**6. 守护进程也已握手成功**（`skyward snapuserd`）
+
+- 从已安装系统启动 `-user_snapshot`，它**会留在前台**；
+- 它监听的不是抽象命名空间，而是**文件 socket `/dev/socket/snapuserd`**
+  （从它自己的 fd 表看出来：`socket:[...] → /dev/socket/snapuserd`）；
+- 发 `query` 得到 **`Active`**——协议通了；
+- 对 `init,…,/dev/null,/dev/null`（不是快照）它答 `fail`，是正确拒绝。
+
+实测输出：
+
+```
+the daemon at /mnt/system/system/bin/snapuserd: not running
+  query: Active
+the daemon is active and would serve blocks
+  it answered "fail", which is its own word for refusing a device that is not a snapshot
+```
+
+**7. 还差的那一步**
+
+把两者接起来：`init,<misc>,<cow>,<backing>` → 建 dm-user 设备 → `start,<misc>` → 挂载。
+这一步会进入**挂载路径**，而本机没有真实的压缩快照可测（`an update in flight: None`，
+`odm_a-cow` 只是残留）。**没有真实快照就不写它**——把"明确拒绝"换成"没验证过的接线"，
+在一个会读用户系统分区的路径上，不是进步。
+
+要测它，需要一个**由这台手机自己产生的压缩快照**：装一次会走 VABC 的更新包
+（`ro.virtual_ab.userspace.snapshots.enabled=true`，所以正常更新就会产生）。
+
 
 **5. 这改变了工作量的判断**
 
