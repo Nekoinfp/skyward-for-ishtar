@@ -155,69 +155,43 @@ the daemon is active and would serve blocks
   it answered "fail", which is its own word for refusing a device that is not a snapshot
 ```
 
-**7. 还差的那一步**
+**7. 已经接通，并在真机上验证**（2026-11-19）
 
-把两者接起来：`init,<misc>,<cow>,<backing>` → 建 dm-user 设备 → `start,<misc>` → 挂载。
-这一步会进入**挂载路径**，而本机没有真实的压缩快照可测（`an update in flight: None`，
-`odm_a-cow` 只是残留）。**没有真实快照就不写它**——把"明确拒绝"换成"没验证过的接线"，
-在一个会读用户系统分区的路径上，不是进步。
+手机在**系统里**做了一次正常更新（只有这条路会产生用户态快照；recovery 的
+`update_engine_sideload` 会关掉 VABC）。结果：
 
-要测它，需要一个**由这台手机自己产生的压缩快照**：装一次会走 VABC 的更新包
-（`ro.virtual_ab.userspace.snapshots.enabled=true`，所以正常更新就会产生）。
+```
+/metadata/ota/snapuserd_mode = dm-user
+9 个分区：system_b product_b odm_b vendor_b vendor_dlkm_b
+          system_dlkm_b system_ext_b mi_ext_b mi_product_b
+system_b 的 proto：using_snapuserd=1，compression_algorithm="lz4"
+```
 
+在 B 槽的 recovery 里，Skyward 把**九个分区全部挂上**：
 
-**5. 这改变了工作量的判断**
+```
+skyward: mounted odm_b on /odm (erofs)
+skyward: mounted product_b on /mnt/product (erofs)
+skyward: mounted system_b on /mnt/system (erofs)
+… 共 9 个
+```
 
-**压缩与 COW 的解码全部在 daemon 里**，我们这侧不需要实现 XZ/ZSTD 操作符、
-不需要懂 COW 的压缩格式。我方只需要三件事：
+从快照里读出的文件是真的（`snapuserd`、`qseecomd`、`build.prop`），
+**六个密钥服务全部注册**。设备映射的完整形状：
 
-1. 把系统里那个**静态** `snapuserd` 跑起来（已验证它是静态链接）；
-2. 按上面那张表建 **dm-user** 设备、发控制消息；
-3. 合并时改用 daemon 的用户态合并，而不是内核 `snapshot-merge`。
+- 9 × `{分区}-base`（super extents 的 dm-linear）
+- 9 × `{分区}-cow-img`（`/metadata/gsi/ota/lp_metadata` 描述的 COW 镜像）
+- `odm_b-cow`（super 里的 COW 分区）
+- 9 × `user_snapshot-{分区}` 的 dm-user 设备与 `/dev/dm-user/` 控制设备
 
-风险仍在（协议顺序错、掉电时机错会留下半合并状态），但**不再是"几千行魔改"**，
-而是"几百行、接口明确"的对接工作。
+三件事是从**手机自己的抱怨**里学到的：
 
-### B. 只读回退：快照读不了时，退回快照的"基线"——**查过之后结论是：不该做**
+1. **`init` 要 5 段**，不是 4 段。设备日志：`Malformed init message, 4 parts`。
+   第 5 段是它能重新打开 base 设备的路径。
+2. **dm-user 设备要先建**。这版 daemon 在 `init` 时就挂 worker，
+   日志：`Could not open dm-user path: /dev/dm-user/…: No such file or directory`。
+   （AOSP 的顺序是先 init 再建设备，这版不同。）
+3. **daemon 必须在 ramdisk 里**。它服务的正是 system 分区，从已安装系统取是鸡生蛋。
+   打包器为此加了 `--snapuserd`。
 
-想法是：未合并时 `-base`（dm-linear 盖在 super 上）就是更新前的内容，只映射它就能读到
-`vendor`，keymint 起来，`/data` 也许就能解开。
-
-**但这条不成立**，原因在 `crates/skyward-info/src/lib.rs::installed_props()`：
-版本号与补丁级别是**从挂载的分区里读 `build.prop`** 得到的，再由
-`adopt_installed_version()` 写给 keymint。退回基线后读到的是**更新前**的 `build.prop`：
-
-- 若这次更新的补丁级别没变 → 恰好能工作；
-- 若补丁级别变了（常见）→ keymint 被告知旧的补丁级别，而 `/data` 的密钥是在新补丁下
-  封装的 → **仍然解不开**，但此时四个服务都显示"已注册"。
-
-也就是说，B 把一个**明确的失败**（"有更新在飞，去系统里合并"）换成一个**看着像成功、
-其实解不开**的状态。这比现状更糟，所以不该做。
-
-真要做得安全，就必须拿到**新的** `build.prop`——而它在 COW 里，没有 snapuserd 读不到。
-所以没有 A 就没有安全可言的 B。
-
-### 结论
-
-**A 是唯一真正的解**，而且它的接口现在已经查清（见上）。在拿到真机之前，正确的做法是保持现状：
-整体拒绝、界面与 `skyward check` 明说是"有更新在飞、去系统里合并"。
-这条现状本身是对的，不是缺口。
-
-A 仍然值得做，但它必须**先有真机**：没有设备时写协议层等于赌。
-
-## 六、验证方式
-
-A 的验证（每一档都能独立判定成败）：
-
-| 档 | 验证 |
-| --- | --- |
-| 能把 daemon 跑起来 | 在真机上手工执行系统的 `snapuserd`，确认它建出 `/dev/dm-user/<name>` 并接受连接（这一步不改任何数据） |
-| 读得对 | 通过 dm-user 设备读一个快照分区，与"进系统后读到的内容"逐块比对 |
-| 合并安全 | 先在**可丢弃**的机器/备份上验证合并；失败时能确认源分区未被改动 |
-| 端到端 | `skyward check` 四服务注册、`/data` 解开、`an update in flight` 转为已合并 |
-
-## 七、与"非 A/B 更新包"的关系
-
-xuanyuan 是 A/B 机型，非 A/B 的包在它上面永远用不到。已有的安全行为是：
-包若声明了别的机型就拒绝（`declares_other_device`，逗号与竖线两种分隔都认）。
-除非目标改成"支持某台非 A/B 机型"，否则这一项没有可做的内容。
+**仍不做合并（merge）**：合并会往分区里写，是 daemon 自己的活儿，这里明确拒绝。
