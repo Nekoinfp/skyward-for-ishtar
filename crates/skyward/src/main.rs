@@ -307,7 +307,14 @@ fn main() -> Result<()> {
         #[cfg(target_os = "android")]
         Cmd::Merge => {
             let slot = booted_slot()?;
-            let start = skyward_vab::standing(slot)? == skyward_vab::Standing::Waiting;
+            // A compressed snapshot merges in the daemon that serves it, and
+            // starts there too: `Waiting` is the kernel's kind, `Compressed`
+            // the daemon's, and both have to be begun rather than only asked
+            // after.
+            let start = matches!(
+                skyward_vab::standing(slot)?,
+                skyward_vab::Standing::Waiting | skyward_vab::Standing::Compressed
+            );
             let end = merge::run(slot, start, &mut |m| println!("{m:?}"))?;
             println!("ended {end:?}");
             Ok(())
