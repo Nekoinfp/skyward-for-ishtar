@@ -216,43 +216,70 @@ impl<'a> KeyMint<'a> {
         let operation = match self.begin(key_blob, app_id, nonce, note) {
             Ok(operation) => operation,
             Err(e) if status::refused_with(&e) == Some(KEY_REQUIRES_UPGRADE) => {
-                // The secure world says the key was made under an older
-                // build. That is answered by telling it the installed
-                // system's build, not by renewing the key: this firm's key
-                // service refuses upgradeKey with an invalid argument, and
-                // a key that was renewed would no longer open in the system
-                // this recovery is there to serve. Start the key service
-                // again with the version values the installed system names,
-                // which is what a recovery of this generation does, and
-                // open the same key with it once more.
+                // The secure world says the key was made under an older build
+                // and wants it renewed before it is used again. Android's own
+                // key store renews such a key as it unlocks it, and this
+                // service does renew keys — the storage key is renewed the
+                // same way — so asking it to renew this one is the first
+                // thing to try. The renewed blob is only kept in hand: the
+                // phone's own copy is left as it was, so nothing the
+                // installed system reads is changed by a recovery doing this.
                 skyward_sys::kmsg(&format!(
-                    "the key service says a key needs an upgrade ({}); its environment was {}",
-                    e,
-                    crate::environment::said()
+                    "the key service says a key needs an upgrade ({}); asking it to renew the key in hand",
+                    e
                 ))?;
-                let reason = match crate::environment::pin() {
-                    Ok(()) => "the key service was started again".to_string(),
-                    Err(e) => format!("the key service could not be started again: {e:#}"),
-                };
-                let binder = Binder::open().context("open the key driver after the key service restarted")?;
-                let fresh = KeyMint::open(&binder).context("reach the key service after it restarted")?;
-                let again = match fresh.begin(key_blob, app_id, nonce, note) {
-                    Ok(op) => {
-                        let mut out = fresh.update(&op, body)?;
-                        out.extend_from_slice(&fresh.finish(&op)?);
-                        return Ok(out);
+                match self.upgrade(key_blob, |call| {
+                    if app_id.is_empty() {
+                        call.i32(0);
+                    } else {
+                        call.i32(1);
+                        parameter(call, TAG_APPLICATION_ID, Value::Blob(app_id));
                     }
-                    Err(again) => again,
-                };
-                anyhow::ensure!(
-                    status::refused_with(&again) != Some(KEY_REQUIRES_UPGRADE),
-                    "the key service still says the key needs an upgrade after it was started again: {again:#}; \
-                     its hardware is {}, its environment was {}, and restarting it said {}",
-                    crate::environment::hardware(),
-                    crate::environment::said(),
-                    reason
-                );
-                return Err(again);
+                }) {
+                    Ok(renewed) => match self.begin(&renewed, app_id, nonce, note) {
+                        Ok(operation) => operation,
+                        Err(again) => {
+                            let _ = skyward_sys::kmsg(&format!(
+                                "the renewed key did not open either: {again:#}; its environment was {}",
+                                crate::environment::said()
+                            ));
+                            return Err(again);
+                        }
+                    },
+                    Err(why) => {
+                        // Renewing was refused. Tell the service the installed
+                        // system's build instead and open the same key with it
+                        // once more, which is what a recovery of this
+                        // generation does.
+                        skyward_sys::kmsg(&format!(
+                            "the key service would not renew the key ({why:#}); its environment was {}",
+                            crate::environment::said()
+                        ))?;
+                        let reason = match crate::environment::pin() {
+                            Ok(()) => "the key service was started again".to_string(),
+                            Err(e) => format!("the key service could not be started again: {e:#}"),
+                        };
+                        let binder = Binder::open().context("open the key driver after the key service restarted")?;
+                        let fresh = KeyMint::open(&binder).context("reach the key service after it restarted")?;
+                        let again = match fresh.begin(key_blob, app_id, nonce, note) {
+                            Ok(op) => {
+                                let mut out = fresh.update(&op, body)?;
+                                out.extend_from_slice(&fresh.finish(&op)?);
+                                return Ok(out);
+                            }
+                            Err(again) => again,
+                        };
+                        anyhow::ensure!(
+                            status::refused_with(&again) != Some(KEY_REQUIRES_UPGRADE),
+                            "the key service still says the key needs an upgrade after it was started again: {again:#}; \
+                             its hardware is {}, its environment was {}, and restarting it said {}",
+                            crate::environment::hardware(),
+                            crate::environment::said(),
+                            reason
+                        );
+                        return Err(again);
+                    }
+                }
             }
             Err(e) => return Err(e),
         };
