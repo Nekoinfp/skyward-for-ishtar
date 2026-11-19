@@ -240,5 +240,19 @@ AOSP 那边这个参数叫 `base_path`，更像**目录**或分区路径。这�
 - `initiate_merge,<misc>` 回 `success` 才算开始；`getstatus,<misc>` 回 `snapshot-merge-complete` /
   `snapshot-merge-failed`。
 
+**第三次实测（2026-11-20，逐分区状态）**推翻了我自己前面的一个错误判断：我以为合并"卡住"了，其实是**我只问了全局百分比**。用 `getstatus,user_snapshot-<分区>` 逐分区问之后：
+
+| 分区 | 结果 |
+| --- | --- |
+| `odm_b`（COW 在 super 里） | **`snapshot-merge-complete`** |
+| 其余八个（COW 在 `/metadata/gsi/ota/lp_metadata` 镜像里） | 停在 `snapshot-merge`，二十分钟不动，daemon 空闲 |
+
+两个要点：
+
+- `getstatus` 必须用 **daemon 认的名字** `user_snapshot-<分区>`。用分区名问，服务器找不到 handler 就回 `snapshot-merge-failed`——**那是名字找不到，不是合并失败**。我一开始就被这个骗了。
+- 能完成的那个，正好是**唯一一个 COW 在 super 分区里**的。卡住的八个，COW 都在 scratch super 的镜像里。
+
+所以下一步该试的是第 5 段 `base_path_merge` 换个形式（它管的就是 base 设备按路径重开），而**不是**继续折腾全局百分比。
+
 结论不变：**没有可测的快照就不开这条路**。要验证，需要再一次更新产生未合并快照，
 然后先试"第 5 段传别的形式"。

@@ -16,8 +16,8 @@
 | --- | --- |
 | 镜像 | `skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img` |
 | 大小 | 104,857,600 字节（与底包 recovery 分区同尺寸） |
-| SHA-256 | `f9c575ce2987ec638c81029d99f63ca27746087753f580919ef1cd9bafd53ce0` |
-| 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,968,949 字节 |
+| SHA-256 | `15b5118396b2e476f35934aae10b0d18bbc8d18bc99a7e3857c55f1f042b2232` |
+| 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,971,866 字节 |
 | 内含 recovery 本体 | 9,017,496 字节，AArch64 ELF（另含 `system/bin/snapuserd` 1,273,320 字节，读压缩快照用） |
 | 底包 | OS4.0.4.0.XOACNXM，recovery 分区 SHA-256 `55f491052a360bc15362fd80c8bd2dd0912b289e1653f2bd7f9c5a12e7fea27b`（打包器自行核对） |
 
@@ -369,7 +369,7 @@ partitions = 141 under /dev/block/by-name
 | sparse super 实际写盘 | 需要设备 |
 | ~~触摸是否真的能用~~ | **已验证（用户在有屏幕的机器上试过）**：触摸正常。界面渲染另已用 `skyward capture` 与离线预览比对，差异 6.66/255 |
 | ~~压缩快照的读取~~ | **已验证（2026-11-19）**：手机在系统里更新后产生 9 个 lz4 压缩的用户态快照；Skyward 在 B 槽把它们**全部挂载成功**，六个密钥服务全部注册 |
-| 压缩快照的合并 | **会开始，但会卡住——没有开启它**。真机上两次尝试都是：daemon 接手 COW 设备、小的分区（`product_a`）合并完成，然后在最大的分区上**空闲不动**（十秒 CPU 无变化、无写入），十分钟不结束。第二次把 dm-user 设备改成可写也没用。挂住比明确拒绝更糟，所以退回拒绝，并在消息里说明"系统会自己在启动时合并"。实测：从这个半合并状态重启，**系统用约一分钟把九个分区合并完** |
+| 压缩快照的合并 | **部分可行，未开启**。用 `skyward snapuserd --merge` 逐分区问过 daemon（`getstatus` 要用 `user_snapshot-<分区>` 这个名字，用分区名去问一律返回 failed，那是**名字找不到**而不是真的失败）：**COW 在 super 里的分区能合并完成**（`odm_b`），**COW 只在 `/metadata/gsi/ota/lp_metadata` 镜像里的八个分区停在 `snapshot-merge` 二十分钟不动**，daemon 空闲。最可能的原因是 `init` 第 5 段 `base_path_merge`——它是 daemon 合并时**按路径重新打开 base 设备**用的，现在传的是 dm 设备路径。实测退路可用：从这个半合并状态重启，**系统都在约一分钟内把剩下的合并完** |
 | 非 A/B 更新包 | 未实现：xuanyuan 是 A/B 机型，此类包用不上；只加了"包声明了别的机型就拒绝"的安全门 |
 
 ---
