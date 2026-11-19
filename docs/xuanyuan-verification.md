@@ -16,9 +16,9 @@
 | --- | --- |
 | 镜像 | `skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img` |
 | 大小 | 104,857,600 字节（与底包 recovery 分区同尺寸） |
-| SHA-256 | `119ad321a6b68b3d42e22354c235a851b3cc4ae70c9bd5663724d3aff85199ad` |
-| 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,266,442 字节 |
-| 内含 recovery 本体 | 9,010,048 字节，AArch64 ELF |
+| SHA-256 | `5bdb773337a99f0715973830b0e9623bda32c145468f695b6c9e42305772b362` |
+| 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,968,862 字节 |
+| 内含 recovery 本体 | 9,016,792 字节，AArch64 ELF（另含 `system/bin/snapuserd` 1,273,320 字节，读压缩快照用） |
 | 底包 | OS4.0.4.0.XOACNXM，recovery 分区 SHA-256 `55f491052a360bc15362fd80c8bd2dd0912b289e1653f2bd7f9c5a12e7fea27b`（打包器自行核对） |
 
 结构审计（`tools/audit-image.py`）32 项全过：boot 头、ramdisk 解包为 newc 并以
@@ -368,7 +368,7 @@ partitions = 141 under /dev/block/by-name
 | 逻辑分区扩容后能否挂载 | 需要设备（`super` 元数据改动不可逆，先备份） |
 | sparse super 实际写盘 | 需要设备 |
 | ~~触摸是否真的能用~~ | **已验证（用户在有屏幕的机器上试过）**：触摸正常。界面渲染另已用 `skyward capture` 与离线预览比对，差异 6.66/255 |
-| 压缩快照/增量 OTA | 未实现。**但不是手机不支持**：内核已编入 `dm-user`，系统的 `snapuserd` 是静态二进制，两者都在。缺的是 recovery 侧的控制逻辑；**协议已查清并与本机 daemon 核对过**（12/13 控制消息匹配），详见 `docs/vabc-design.md` |
+| ~~压缩快照的读取~~ | **已验证（2026-11-19）**：手机在系统里更新后产生 9 个 lz4 压缩的用户态快照；Skyward 在 B 槽把它们**全部挂载成功**，六个密钥服务全部注册。合并（merge）仍不做 |
 | 非 A/B 更新包 | 未实现：xuanyuan 是 A/B 机型，此类包用不上；只加了"包声明了别的机型就拒绝"的安全门 |
 
 ---
