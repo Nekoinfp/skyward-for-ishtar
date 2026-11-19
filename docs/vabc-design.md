@@ -210,3 +210,35 @@ skyward: mounted system_b on /mnt/system (erofs)
 实测这条退路可用：从这个半合并状态重启，**系统用约一分钟把九个分区合并完**，`snapuserd` 停止，`/data` 从 404G 降到 394G（COW 空间释放）。
 
 未查清的原因（留给以后）：daemon 在 `init` 时收到的第五个参数是"重新打开 base 设备的路径"，给的是 dm 设备路径；AOSP 那边更像是一个**目录**。这可能就是它卡住的地方。
+### 合并为什么卡住——查到的确切协议
+
+从 AOSP 的 `snapuserd_server.cpp`（`user-space-merge/`）读到：
+
+```cpp
+// init,<misc_name>,<cow_device_path>,<backing_device>,<base_path_merge>
+if (out.size() != 5) { LOG(ERROR) << "Malformed init message, " ...; return Sendmsg(fd, "fail"); }
+auto handler = AddHandler(out[1], out[2], out[3], out[4], std::nullopt);
+```
+
+而客户端 `snapuserd_client.cpp` 的 `InitDmUserCow(misc, cow, backing, base_path_merge)` 是：
+
+```cpp
+if (base_path_merge.empty()) parts = {"init", misc_name, cow_device, backing_device};        // 4 段
+else                          parts = {"init", misc_name, cow_device, backing_device, base_path_merge};  // 5 段
+```
+
+**`base_path_merge` 不是可选的**：daemon 只接受 5 段。它的用途是让 daemon 在合并时**按路径重新打开 base 设备**
+（读的时候可以用 init 时拿到的 fd，写回时要另开一个可写的）。
+
+我给的第 5 段就是 base 的 dm 设备路径（`/dev/block/dm-N`）。这可能不是它要的形式——
+AOSP 那边这个参数叫 `base_path`，更像**目录**或分区路径。这是下一步最该试的地方。
+
+另外两处协议细节，也一并记下：
+
+- `merge_percent` **不带参数**，返回一个全局百分比（`handlers_->GetMergePercentage()`）；
+  22.2% = 2/9 正好对应"两个 handler 有合并状态"。所以卡住时这个数不动是准确的信号。
+- `initiate_merge,<misc>` 回 `success` 才算开始；`getstatus,<misc>` 回 `snapshot-merge-complete` /
+  `snapshot-merge-failed`。
+
+结论不变：**没有可测的快照就不开这条路**。要验证，需要再一次更新产生未合并快照，
+然后先试"第 5 段传别的形式"。
