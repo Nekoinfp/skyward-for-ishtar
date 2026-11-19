@@ -469,11 +469,11 @@ fn delete_snapshot(name: &str) -> Result<()> {
 /// the way is taken away again if it does not come up.
 pub fn map_snapshot(snaps: &Snapshots, md: &Metadata, devices: &[(u32, u32)], p: &Partition, status: &SnapshotStatus) -> Result<PathBuf> {
     let update = snaps.update()?;
-    ensure!(
-        !status.using_snapuserd && !update.using_snapuserd,
-        "{}'s snapshot is compressed and served by snapuserd, which this recovery does not run",
-        p.name
-    );
+    // A compressed snapshot's blocks are not the kernel's to read: the phone's
+    // own daemon serves them, through a device the kernel asks in user space.
+    // Everything up to that device — the base the partition's extents make and
+    // the copy-on-write space — is built the same way either side.
+    let userspace = status.using_snapuserd || update.using_snapuserd;
     let sector = SECTOR_SIZE;
     ensure!(status.device_size.is_multiple_of(sector), "{} is {} bytes, not whole sectors", p.name, status.device_size);
     ensure!(
@@ -521,6 +521,20 @@ pub fn map_snapshot(snaps: &Snapshots, md: &Metadata, devices: &[(u32, u32)], p:
             }
         };
         let kind = if merge { "snapshot-merge" } else { "snapshot" };
+        if userspace {
+            // Merging writes into the partition as it goes, and has to be the
+            // daemon's own work with the copy-on-write device in its hands;
+            // reading is not, and that is what is done here.
+            ensure!(!merge, "{}'s compressed snapshot is being merged, which this recovery does not drive", p.name);
+            let misc = format!("user_snapshot-{}", p.name);
+            let sectors = crate::snapuserd_client::init_cow(&misc, &cow_dev, &base_dev, None)
+                .with_context(|| format!("give the snapshot daemon {}'s devices", p.name))?;
+            let served = dm::create(&misc, &[dm::Target::DmUser { sectors, name: misc.clone(), partitions: 1 }], true)
+                .with_context(|| format!("make the device {misc} is served through"))?;
+            made.push(misc.clone());
+            crate::snapuserd_client::start(&misc).with_context(|| format!("start {misc} being served"))?;
+            return Ok(served);
+        }
         let snapshot = dm::Target::Snapshot {
             sectors: status.snapshot_size / sector,
             base: devnum(&base_dev)?,

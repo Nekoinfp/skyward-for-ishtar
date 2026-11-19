@@ -16,6 +16,8 @@ pub use partitions::{
     Whole,
 };
 pub mod dmuser;
+#[cfg(unix)]
+pub mod snapuserd_client;
 pub use snapshots::Merge;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
