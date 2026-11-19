@@ -361,7 +361,7 @@ SHA-256 60379dbb7101b1d10d506a951ad47e461d58e295e7c569b9c38130e1309882d8
 
 打包器自己从 4.0.4.0 更新包里取出 recovery 分区并核对了哈希。镜像内容逐项核对过：
 形状与底包一致（`ANDROID!`、header_version 4、kernel 0、同尺寸）、
-`system/bin/recovery` 是 Skyward 本体（8996632 字节）、`system/bin/skyward` 与五个
+`system/bin/recovery` 是 Skyward 本体（8996696 字节）、`system/bin/skyward` 与五个
 脚本命令链接都在、`skyward/device.toml` 与仓库里的逐字节相同、OMAPI 的二进制与
 VINTF 清单齐全、`prop.default` 末尾是 `ro.secure=0` / `ro.debuggable=1` 且已移除构建
 版本属性。**它没有在任何手机上运行过。**
