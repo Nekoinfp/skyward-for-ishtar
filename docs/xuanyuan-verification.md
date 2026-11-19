@@ -283,6 +283,7 @@ user 999's own files stay closed
 ```
   the data partition: open, its files can be read
   the data partition: closed, so nothing in it can be read yet
+  the users' own files: 0 closed, 999 closed
 ```
 
 真机上第二次启动那种"服务全注册、但 `/data` 没挂"的状态，现在一眼就能看出来。
