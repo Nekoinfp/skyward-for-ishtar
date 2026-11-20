@@ -36,6 +36,12 @@ pub(crate) const SUBPIXELS: f32 = 4.0;
 /// anew.
 const GLYPHS_KEPT: usize = 16_384;
 
+/// The em past which type is placed on whole pixels along the line, because
+/// a larger glyph drawn at a fraction of one is not rasterized faithfully:
+/// see [`Face::on_whole_pixels`]. Measured on MiSans, which goes wrong at
+/// 132 px; 120 keeps a margin under it.
+const WHOLE_PIXEL_FROM_EM: f32 = 120.0;
+
 #[derive(Default)]
 struct Known {
     /// Each character's glyph and advance, unscaled.
@@ -66,10 +72,23 @@ impl Face {
         (id, advance * scale.x / self.height)
     }
 
+    /// Whether a glyph this large is placed on whole pixels along the line,
+    /// rather than at the fraction of one its pen lands on.
+    ///
+    /// Measured on MiSans, a variable font: past about 130 px to the em an
+    /// outline drawn three quarters of a pixel along comes back from
+    /// `ab_glyph` smeared over its whole box rather than drawn — no pixel of
+    /// it near solid — which reaches the screen as a grey rectangle where the
+    /// letter should be. A static font at the same size is unaffected. The
+    /// largest type therefore goes on whole pixels, where a quarter of one is
+    /// not visible; everything smaller keeps its fraction.
+    pub(crate) fn on_whole_pixels(&self, scale: PxScale) -> bool {
+        scale.y >= self.scale(WHOLE_PIXEL_FROM_EM).y
+    }
+
     /// The ink of glyph `id` at `scale`, drawn `qx` and `qy` quarters of a
     /// pixel right of and below a whole pixel.
-    pub(crate) fn ink_of(&self, id: GlyphId, scale: PxScale, qx: u8, qy: u8) -> Option<Rc<Ink>> {
-        let key = (id.0, scale.x.to_bits(), qx, qy);
+    pub(crate) fn ink_of(&self, id: GlyphId, scale: PxScale, qx: u8, qy: u8) -> Option<Rc<Ink>> {        let key = (id.0, scale.x.to_bits(), qx, qy);
         if let Some(ink) = self.known.borrow().glyphs.get(&key) {
             return ink.clone();
         }
@@ -306,6 +325,76 @@ pub(crate) fn bundled() -> Fonts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Temporary: which offsets are wrong at the wordmark's size, and where
+    /// the size stops being rasterized faithfully at all.
+    #[test]
+    fn diag_ink_of() {
+        let f = bundled();
+        let face = &f.display;
+        let em = 37.8 * 3.75;
+        let scale = face.scale(em);
+        let (id, _) = face.glyph('y', scale);
+        let solidity = |qx: u8, qy: u8| {
+            let at = ab_glyph::point(qx as f32 / SUBPIXELS, qy as f32 / SUBPIXELS);
+            let og = face.font.outline_glyph(id.with_scale_and_position(scale, at)).expect("outline");
+            let (mut solid, mut n) = (0u32, 0u32);
+            og.draw(|_, _, c| {
+                n += 1;
+                if c > 0.95 { solid += 1; }
+            });
+            let _ = n;
+            solid
+        };
+        println!("em {em}: 各偏移的实心像素数");
+        for qy in 0..4u8 {
+            let row: Vec<String> = (0..4u8).map(|qx| format!("{:4}", solidity(qx, qy))).collect();
+            println!("  qy={qy}: {}", row.join(" "));
+        }
+        println!("临界字号:");
+        for em in [120.0f32, 125.0, 128.0, 130.0, 132.0, 135.0, 138.0, 141.0, 141.75] {
+            let sc = face.scale(em);
+            let mut worst = u32::MAX;
+            for qy in 0..4u8 {
+                for qx in 0..4u8 {
+                    let at = ab_glyph::point(qx as f32 / SUBPIXELS, qy as f32 / SUBPIXELS);
+                    let og = face.font.outline_glyph(id.with_scale_and_position(sc, at)).expect("outline");
+                    let mut solid = 0u32;
+                    og.draw(|_, _, c| {
+                        if c > 0.95 { solid += 1; }
+                    });
+                    worst = worst.min(solid);
+                }
+            }
+            println!("  em {em:6.2}: 最少实心像素 {worst}");
+        }
+    }
+    /// The wordmark is drawn at a fraction of a pixel, so every letter is
+    /// rasterized at each of the sixteen quarter offsets. At one of them the
+    /// outline used to come back as a filled box the size of the letter —
+    /// a grey rectangle where the glyph should be. A glyph has empty pixels
+    /// inside its box and solid ones on its strokes; a filled box has neither.
+    #[test]
+    fn every_letter_is_drawn_at_every_quarter_of_a_pixel() {
+        use crate::canvas::Canvas;
+        let f = bundled();
+        // The About page's wordmark size at the panel's own density, which is
+        // where a letter used to come back as a grey box.
+        let em = 37.8 * 3.75;
+        for ch in ['y', 'S', 'k', 'w', 'a', 'd'] {
+            for qx in 0..4 {
+                let x = 20.0 + qx as f32 * 0.25;
+                let mut c = Canvas::new(300, 300);
+                c.text(&f.display, &ch.to_string(), x, 250.0, em, crate::color::Rgba::rgb(0, 0, 0), None);
+                let alphas: Vec<u8> = c.data.as_chunks::<4>().0.iter().map(|p| p[3]).collect();
+                let n = alphas.len();
+                let empty = alphas.iter().filter(|&&v| v == 0).count();
+                let solid = alphas.iter().filter(|&&v| v > 240).count();
+                assert!(solid > 0, "{ch} at x+{qx}/4: no solid stroke at all, so the outline came back smeared");
+                assert!(empty > n / 2, "{ch} at x+{qx}/4: only {empty} of {n} pixels empty, so it is a filled box");
+            }
+        }
+    }
 
     #[test]
     fn a_line_is_as_tall_as_the_stock_search_fields_cursor() {

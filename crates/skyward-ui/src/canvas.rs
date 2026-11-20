@@ -1023,6 +1023,10 @@ impl Canvas {
             ((q / SUBPIXELS).floor() as i32, q.rem_euclid(SUBPIXELS) as u8)
         };
         let ((ix, qx), (iy, qy)) = (quarter(x), quarter(baseline));
+        // The largest type goes on whole pixels along the line, where a
+        // fraction of one is not visible and where the rasterizer does not
+        // smear the outline over its whole box: see `Face::on_whole_pixels`.
+        let (ix, qx) = if face.on_whole_pixels(scale) { (x.round() as i32, 0) } else { (ix, qx) };
         let Some(art) = face.ink_of(id, scale, qx, qy) else { return };
         let (ox, oy) = (ix + art.x, iy + art.y);
         let (from, to) = self.columns(ox, ox + art.w as i32);
