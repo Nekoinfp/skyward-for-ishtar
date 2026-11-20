@@ -495,3 +495,41 @@ UI 测试 386 项全过（含新增"压缩更新同样滑动合并"）。
 - `devices/` 其他机型配置：恢复上游的 `dada/ishtar/nezha` 三个文件（它们带修复），
   我们的 `xuanyuan.toml` 不受影响
 - slides/ 文档图片：上游新增，无冲突，随后续合并带上
+**OTA 安装后的"卡米"问题**（2026-11-20，真机实测）
+
+**现象**：在 Skyward recovery 里用 `update_engine_sideload` 安装完整包（10.4 GB），
+安装本身**成功**（`exit status: 0`，九个分区写入并校验通过），但重启后**卡在小米 logo**，
+无法进入系统，最终回落 fastboot。A/B 两槽的 `slot-successful` 都变为 `no`，
+`slot-retry-count` 耗尽。
+
+**根因**（已定位）：
+
+1. update_engine 把 A 槽（next 槽）的 **boot、vbmeta、recovery 全部刷成原厂**；
+2. Skyward 的"写回 recovery"（`reflash`）**失败**：`write recovery_a: Operation not permitted`——
+   不是简单的写保护，而是**底层存储/内核拒绝**（discard 和 write 都报 EPERM）；
+3. 这个失败**没有阻止安装完成**（`Done::Installed` 仍返回），但 recovery 实际没写回；
+4. **AVB 校验**（`post_avb`）只在 `disable_avb` 选项开启时才执行，且只改 vbmeta flags——
+   **小米 OS 4.0 的 bootloader 有额外的签名校验**，即使 `disable-verification` 置位，
+   仍然拒绝启动非原厂签名的 boot。
+
+**结论**：这是**小米 OS 4.0 的硬件级限制**，不是 Skyward 的 bug。
+网上同类报告（[知乎](https://wenku.csdn.net/answer/31fxgsm7d5mi)、
+[看雪](https://bbs.kanxue.com/thread-265792.htm)）都指向同一机制：
+**第三方 recovery 刷入完整包后，boot/vbmeta 被重置为原厂，而小米 bootloader
+在 OS 4.0 之后不再接受 `disable-verification` 标志的绕过**。
+
+**Skyward 可以改进的**：
+
+- recovery 写回失败时，UI 应明确警告"**下次启动可能失败**"，而不是只显示一行小字；
+- 如果 `disable_avb` 开启，应在 recovery 写回失败后**仍然尝试禁用 AVB**
+  （当前代码在 `reflash` 失败后会继续执行 `post_avb`，但用户可能没开这个选项）。
+
+**用户应对**：
+
+- 安装 OTA 前，**备份原厂 boot 和 vbmeta**；
+- 安装后如果卡米，进 fastboot 刷回备份的 boot/vbmeta；
+- 或者**不要从第三方 recovery 安装完整包**——只在系统内更新（设置→系统更新），
+  由小米自己的更新器处理 AVB。
+
+**未验证的假设**：如果安装前 `disable_avb` 已开启且 vbmeta 的 `disable-verification`
+已置位，是否仍会被拒绝？需要一次带这个前提的实测。
