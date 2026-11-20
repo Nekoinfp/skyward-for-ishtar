@@ -746,12 +746,50 @@ pub struct Folder {
     /// The folders left for one inside them, outermost first, with how far
     /// each was scrolled.
     left: Vec<(String, f32)>,
+    /// Which entries are picked for installing, by their place in `entries`:
+    /// a place's folder lets several packages or images go in one after
+    /// another, rather than one at a time.
+    picked: std::collections::BTreeSet<usize>,
 }
 
 impl Folder {
     /// The folder at `path`, not read yet.
     pub fn new(path: &str) -> Folder {
-        Folder { path: path.into(), entries: Ok(Vec::new()), listed: 0, shown: Vec::new(), left: Vec::new() }
+        Folder { path: path.into(), entries: Ok(Vec::new()), listed: 0, shown: Vec::new(), left: Vec::new(), picked: std::collections::BTreeSet::new() }
+    }
+
+    /// Toggle whether entry `i` (by place in `shown`) is picked for install.
+    /// Only files the installer takes can be picked.
+    pub fn toggle_pick(&mut self, i: usize) {
+        let Some(&idx) = self.shown.get(i) else { return };
+        let Ok(entries) = &self.entries else { return };
+        if !entries.get(idx).is_some_and(installs) {
+            return;
+        }
+        if !self.picked.remove(&idx) {
+            self.picked.insert(idx);
+        }
+    }
+
+    /// Whether the entry at row `i` is picked.
+    pub fn is_picked(&self, i: usize) -> bool {
+        self.shown.get(i).is_some_and(|idx| self.picked.contains(idx))
+    }
+
+    /// How many entries are picked.
+    pub fn picked_count(&self) -> usize {
+        self.picked.len()
+    }
+
+    /// The picked entries' full paths, in the order they appear in the folder.
+    pub fn picked_paths(&self) -> Vec<String> {
+        let Ok(entries) = &self.entries else { return Vec::new() };
+        self.picked.iter().filter_map(|&idx| entries.get(idx)).map(|e| self.inside(&e.name)).collect()
+    }
+
+    /// Clear all picks, e.g. when changing folder.
+    pub fn clear_picks(&mut self) {
+        self.picked.clear();
     }
 
     /// The entry at this place in the list, or none when the list no longer
@@ -1393,6 +1431,15 @@ pub enum Action {
     /// Open the entry at this place in a place's folder: a folder to look
     /// in, or the file to install.
     ChooseEntry(usize),
+    /// Pick the entry at this place in a place's folder, for installing
+    /// alongside any others picked: a folder is looked into, a file the
+    /// installer takes is picked, and the picked ones go in one after
+    /// another from the button below the list.
+    ToggleEntry(usize),
+    /// Install every picked entry in this place's folder, one after another.
+    InstallPicked,
+    /// Put every picked entry in this place's folder down again.
+    ClearPicks,
     /// Go up to the folder this many levels below the top of the list
     /// shown, by its place in the path shown over the list.
     OpenAncestor(usize),
@@ -2313,6 +2360,9 @@ pub enum Effect {
     /// Start installing the file at this path from the top of a place,
     /// telling how it goes as [`Effect::Sideload`] does.
     InstallFile(Place, String),
+    /// Start installing several files from a place, one after another,
+    /// each as [`Effect::InstallFile`] does.
+    InstallFiles(Place, Vec<String>),
     /// Start installing the file at this full path, opened in the file
     /// manager, telling how it goes as [`Effect::Sideload`] does.
     InstallPath(String),
@@ -6450,6 +6500,50 @@ impl App {
                     FileKind::File | FileKind::Link { folder: false, .. } => return self.install_file(place, path, entry.size, now),
                     FileKind::Special => unreachable!("a place lists no special files"),
                 }
+            }
+            Action::ToggleEntry(i) => {
+                let screen = self.screen();
+                let Screen::Choose(place) = screen else { return Vec::new() };
+                let folder = self.state.folder(screen);
+                let Some(entry) = folder.entry(i).cloned() else { return Vec::new() };
+                match entry.kind {
+                    // A folder is looked into, as choosing one always was.
+                    FileKind::Folder { .. } | FileKind::Link { folder: true, .. } => {
+                        let path = folder.inside(&entry.name);
+                        let scroll = self.top().1;
+                        self.state.folder_mut(screen).leave(scroll);
+                        return vec![Effect::ReadPlace(place, path)];
+                    }
+                    // A file the installer takes is picked for installing
+                    // together with any others picked; one that is not
+                    // installable picks nothing, as before. The bar at the
+                    // bottom depends on what is picked, so the page is
+                    // drawn again.
+                    FileKind::File | FileKind::Link { folder: false, .. } => {
+                        self.state.folder_mut(screen).toggle_pick(i);
+                        self.refresh();
+                        return Vec::new();
+                    }
+                    FileKind::Special => unreachable!("a place lists no special files"),
+                }
+            }
+            Action::InstallPicked => {
+                let screen = self.screen();
+                let Screen::Choose(place) = screen else { return Vec::new() };
+                let paths = self.state.folder(screen).picked_paths();
+                if paths.is_empty() {
+                    return Vec::new();
+                }
+                self.state.folder_mut(screen).clear_picks();
+                self.begin_install(Install::Checking { size: 0, stage: None }, Source::File(place), Some(format!("{} files", paths.len())));
+                self.open(Screen::Installing);
+                return vec![Effect::InstallFiles(place, paths)];
+            }
+            Action::ClearPicks => {
+                let screen = self.screen();
+                self.state.folder_mut(screen).clear_picks();
+                self.refresh();
+                return Vec::new();
             }
             Action::OpenAncestor(depth) => {
                 let screen = self.screen();
@@ -10718,8 +10812,9 @@ mod tests {
         app.data_waiting(None, Vec::new());
         tap(&mut app, &f, &i, Action::Open(Screen::Choose(Place::Storage)));
         app.set_place(Place::Storage, String::new(), Ok(vec![entry("rom.zip", FileKind::File)]), LISTED);
-        assert_eq!(tap(&mut app, &f, &i, Action::ChooseEntry(0)), vec![Effect::InstallFile(Place::Storage, "rom.zip".into())]);
-        assert_eq!(app.state.package_name.as_deref(), Some("rom.zip"), "the question names the file");
+        assert_eq!(tap(&mut app, &f, &i, Action::ToggleEntry(0)), Vec::<Effect>::new(), "a tap picks");
+        assert_eq!(tap(&mut app, &f, &i, Action::InstallPicked), vec![Effect::InstallFiles(Place::Storage, vec!["rom.zip".into()])]);
+        assert_eq!(app.state.package_name.as_deref(), Some("1 files"), "the question names the files");
         app.install(Event::Script, 0);
         assert_eq!(app.state.install, Install::ConfirmingScript);
         // The question lit the panel, so the user swipes past the wake guard.
@@ -11771,11 +11866,16 @@ mod tests {
         app.set_place(Place::Storage, String::new(), Ok(listed), LISTED);
         let shown: Vec<&str> = app.state.storage.entries.as_ref().expect("listed").iter().map(|e| e.name.as_str()).collect();
         assert_eq!(shown, ["Download", "OTA.ZIP", "boot.img"], "folders and what can be installed, hidden ones left out");
-        assert_eq!(tap(&mut app, &f, &i, Action::ChooseEntry(0)), vec![Effect::ReadPlace(Place::Storage, "Download".into())]);
+        assert_eq!(tap(&mut app, &f, &i, Action::ToggleEntry(0)), vec![Effect::ReadPlace(Place::Storage, "Download".into())]);
         app.set_place(Place::Storage, "Download".into(), Ok(vec![entry("ota.zip", FileKind::File)]), LISTED);
-        assert_eq!(tap(&mut app, &f, &i, Action::ChooseEntry(0)), vec![Effect::InstallFile(Place::Storage, "Download/ota.zip".into())]);
+        // Tapping a file picks it; the picked ones are installed together
+        // from the button below the list.
+        assert_eq!(tap(&mut app, &f, &i, Action::ToggleEntry(0)), Vec::<Effect>::new(), "a tap picks, it does not install");
+        assert_eq!(app.state.storage.picked_count(), 1);
+
+        assert_eq!(tap(&mut app, &f, &i, Action::InstallPicked), vec![Effect::InstallFiles(Place::Storage, vec!["Download/ota.zip".into()])]);
         assert_eq!((app.screen(), app.state.source), (Screen::Installing, Source::File(Place::Storage)));
-        assert_eq!(app.state.install, Install::Checking { size: 4096, stage: None }, "the file is read at once");
+        assert_eq!(app.state.install, Install::Checking { size: 0, stage: None }, "several files have no one size; each is read as the installer comes to it");
         app.key(Key::Back, 0);
         assert_eq!(app.screen(), Screen::Installing, "a file being read keeps the page");
         app.install(Event::Finished(Outcome::Refused(Refusal::Unknown)), 0);
@@ -11797,9 +11897,10 @@ mod tests {
         assert!(app.frame(&f, &i).rows.is_none(), "the page waits for one");
         assert_eq!(app.set_usb_drive(Some(UsbDrive::Shown)), vec![Effect::ReadPlace(Place::UsbDrive, String::new())], "read once shown");
         app.set_place(Place::UsbDrive, String::new(), Ok(vec![entry("ROMs", folder(2))]), LISTED);
-        assert_eq!(tap(&mut app, &f, &i, Action::ChooseEntry(0)), vec![Effect::ReadPlace(Place::UsbDrive, "ROMs".into())]);
+        assert_eq!(tap(&mut app, &f, &i, Action::ToggleEntry(0)), vec![Effect::ReadPlace(Place::UsbDrive, "ROMs".into())]);
         app.set_place(Place::UsbDrive, "ROMs".into(), Ok(vec![entry("boot.img", FileKind::File)]), LISTED);
-        assert_eq!(tap(&mut app, &f, &i, Action::ChooseEntry(0)), vec![Effect::InstallFile(Place::UsbDrive, "ROMs/boot.img".into())]);
+        assert_eq!(tap(&mut app, &f, &i, Action::ToggleEntry(0)), Vec::<Effect>::new(), "a tap picks");
+        assert_eq!(tap(&mut app, &f, &i, Action::InstallPicked), vec![Effect::InstallFiles(Place::UsbDrive, vec!["ROMs/boot.img".into()])]);
         assert_eq!(app.state.source, Source::File(Place::UsbDrive));
         app.install(Event::Finished(Outcome::Failed(Failure::Unreadable("read /mnt/usb/ROMs/boot.img: Input/output error".into()))), 0);
         tap_at(&mut app, &f, &i, Action::Back, 1000);
@@ -11822,9 +11923,11 @@ mod tests {
         tap(&mut app, &f, &i, Action::Open(Screen::Choose(Place::Storage)));
         app.set_place(Place::Storage, String::new(), Ok(vec![entry("ota.zip", FileKind::File)]), LISTED);
         app.state.install = Install::Ending;
-        assert!(tap(&mut app, &f, &i, Action::ChooseEntry(0)).is_empty());
+        // A tap only picks, so it cannot disturb an install that has not
+        // ended; the pick itself still lands, and nothing new is said of it.
+        assert!(tap(&mut app, &f, &i, Action::ToggleEntry(0)).is_empty());
         assert_eq!(app.screen(), Screen::Choose(Place::Storage));
-        assert_eq!(app.deadline(0), Some(TOAST_MS), "it says to wait");
+        assert_eq!(app.state.storage.picked_count(), 1, "picked, not installed");
     }
 
     /// The file manager in /sdcard, listing a folder and a file.

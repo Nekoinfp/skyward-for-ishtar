@@ -1320,6 +1320,10 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     let readings = Readings::start(cfg)?;
     let mut read_at = Instant::now();
     let mut installer: Option<Installer> = None;
+    // Files picked to go in one after another, and the place they were
+    // picked from: the first is installing already, and each that finishes
+    // hands its place to the next.
+    let mut picked_rest: Option<(Place, Vec<String>)> = None;
     // Whether the panel's frame memory has been blacked out for an off
     // panel; cleared once a real frame is shown again.
     let mut blanked = false;
@@ -2021,6 +2025,49 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                 if finished {
                     installer = None;
                     sideloading = false;
+                    // The next of the picked files, where any are left and
+                    // this one did not ask the phone to leave or to be
+                    // erased: the queue hands the next over as this one
+                    // ended, so the whole picked lot goes in without the
+                    // owner finding the folder again. Where this one did ask
+                    // for that, what is left is dropped rather than left
+                    // waiting for a phone that is leaving.
+                    let carry_on = !wipe_after && rescue_leaves.is_none();
+                    if !carry_on {
+                        picked_rest = None;
+                    }
+                    if let (Some((place, rest)), true) = (picked_rest.take(), carry_on) {
+                        match rest.split_first() {
+                            Some((next, [])) => {
+                                // Only the one was left: it goes in, and
+                                // nothing more waits behind it.
+                                match Installer::open(in_place(place, next), detach(cfg.services.clone()), install_options(&app)) {
+                                    Ok(next_installer) => {
+                                        installer = Some(next_installer);
+                                        app.install(skyward_install::Event::Checking { size: 0 }, now);
+                                    }
+                                    Err(e) => {
+                                        skyward_sys::kmsg(&format!("install: {next} cannot be opened: {e:#}"))?;
+                                        app.install(skyward_install::Event::Finished(skyward_install::Outcome::Failed(skyward_install::Failure::Unreadable(format!("{next}: {e:#}")))), now);
+                                    }
+                                }
+                            }
+                            Some((next, more)) => {
+                                match Installer::open(in_place(place, next), detach(cfg.services.clone()), install_options(&app)) {
+                                    Ok(next_installer) => {
+                                        picked_rest = Some((place, more.to_vec()));
+                                        installer = Some(next_installer);
+                                        app.install(skyward_install::Event::Checking { size: 0 }, now);
+                                    }
+                                    Err(e) => {
+                                        skyward_sys::kmsg(&format!("install: {next} cannot be opened: {e:#}"))?;
+                                        app.install(skyward_install::Event::Finished(skyward_install::Outcome::Failed(skyward_install::Failure::Unreadable(format!("{next}: {e:#}")))), now);
+                                    }
+                                }
+                            }
+                            None => {}
+                        }
+                    }
                     // A sideload or an update the system asked for is done
                     // with however it went, and so is rescue, once its page
                     // is left or the computer asks the phone to leave. A
@@ -2694,6 +2741,19 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                             continue;
                         }
                         installer = Some(Installer::open(in_place(place, &path), detach(cfg.services.clone()), install_options(&app))?);
+                    }
+                    Effect::InstallFiles(place, paths) => {
+                        ensure!(installer.is_none(), "an installer is running already");
+                        if !withhold(&mut transfer, &mut app, now)? {
+                            continue;
+                        }
+                        // The rest wait for the first: an install is one at
+                        // a time, and several picked files go in one after
+                        // another from the same place.
+                        let mut paths = paths.into_iter();
+                        let first = paths.next().expect("InstallFiles names at least one");
+                        picked_rest = Some((place, paths.collect::<Vec<_>>()));
+                        installer = Some(Installer::open(in_place(place, &first), detach(cfg.services.clone()), install_options(&app))?);
                     }
                     Effect::InstallPath(path) => {
                         ensure!(installer.is_none(), "an installer is running already");

@@ -3722,7 +3722,21 @@ pub fn choose(cx: &Ctx, place: Place) -> Frame {
         _ => None,
     };
     let empty = l.pick(["暂无可安装的文件", "沒有可安裝的檔案", "Nothing here to install"]);
-    listing(cx, s.folder(Screen::Choose(place)), place_name(l, place), absent, empty, Action::ChooseEntry, l.pick(["选择文件", "選擇檔案", "Choose a file"]))
+    let folder = s.folder(Screen::Choose(place));
+    #[cfg(test)]
+    eprintln!("choose(): place={:?} picked={} path={}", place, folder.picked_count(), folder.path);
+    let mut frame = listing(cx, folder, place_name(l, place), absent, empty, Action::ToggleEntry, l.pick(["选择文件", "選擇檔案", "Choose a file"]));
+    // Several packages or images go in one after another: tapping a file
+    // picks it, and the picked ones install together from the bar held at
+    // the bottom, the way the file manager holds its copy-and-move bar
+    // there.
+    let picked = folder.picked_count();
+    if picked > 0 {
+        let go = tr!(l, "安装选中的 {picked} 个文件", "安裝選中的 {picked} 個檔案", "Install {picked} picked files");
+        let (canvas, rects) = widgets::dock_bar(cx.t, cx.f, files::page(cx.t), &[l.pick(["清除选择", "清除選擇", "Clear picks"]), &go]);
+        frame.dock = Some(Dock { canvas, hits: hits(&rects, &[Action::ClearPicks, Action::InstallPicked]) });
+    }
+    frame
 }
 
 /// A folder laid out as the stock file manager lays one out: the path as
@@ -3778,7 +3792,8 @@ pub fn row(screen: Screen, cx: &Ctx, i: usize, c: &mut Canvas) {
         Screen::Files | Screen::Choose(_) => {
             let folder = cx.state.folder(screen);
             let Some(e) = folder.entry(i) else { return };
-            files::row(c, cx.t, cx.f, cx.state.lang, e, folder.listed, cx.state.time_zone);
+            let picked = folder.is_picked(i);
+            files::row(c, cx.t, cx.f, cx.state.lang, e, folder.listed, cx.state.time_zone, picked);
         }
         Screen::Installing => widgets::output_row(c, cx.t, cx.f, &cx.state.script_output, i),
         Screen::PartWork => {

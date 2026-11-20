@@ -252,7 +252,7 @@ pub fn found_rows(t: &Theme, f: &Fonts, top: f32, found: &[&Found], action: fn(u
 /// the filesystem.
 #[allow(clippy::too_many_arguments)]
 pub fn found_row(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, found: &Found, root: &str, now: i64, zone: usize) {
-    row(c, t, f, l, &found.entry, now, zone);
+    row(c, t, f, l, &found.entry, now, zone, false);
     let m = &t.m;
     let (x, w) = (m.dp(TEXT_X_DP), name_width(t));
     let lines = name_lines(&f.heading, m.dp(NAME_DP), &found.entry.name, w).len();
@@ -276,7 +276,7 @@ fn in_folder(folder: &str, root: &str) -> String {
 /// `now` in the zone at `zone` in [`crate::app::TIME_ZONES`], and a chevron
 /// for what opens as a folder.
 #[allow(clippy::too_many_arguments)]
-pub fn row(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, e: &FileRow, now: i64, zone: usize) {
+pub fn row(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, e: &FileRow, now: i64, zone: usize, picked: bool) {
     let m = &t.m;
     let p = palette(t);
     c.clear(p.page);
@@ -302,6 +302,12 @@ pub fn row(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, e: &FileRow, now: i64,
     c.text(&f.value, &fmt::file_line(l, e, now, zone), x, base, m.dp(LINE_DP), p.line, Some(w));
     if folder {
         chevron(c, t, cy, p.chevron);
+    } else if picked {
+        // A file picked for installing gets a small green tick at its right,
+        // so the owner can see what is going in together.
+        let (tx, ty) = (m.w as f32 - m.dp(40.0), cy - m.dp(10.0));
+        c.fill_circle(tx, ty, m.dp(10.0), Rgba::rgb(0x34, 0xc7, 0x59));
+        c.text(&f.value, "✓", tx - m.dp(5.0), ty + m.dp(5.0), m.dp(14.0), Rgba::rgb(255, 255, 255), None);
     }
 }
 
