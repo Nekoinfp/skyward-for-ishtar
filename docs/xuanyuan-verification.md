@@ -16,9 +16,9 @@
 | --- | --- |
 | 镜像 | `skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img` |
 | 大小 | 104,857,600 字节（与底包 recovery 分区同尺寸） |
-| SHA-256 | `7fe901e8e2cb762c2ed3ad19c5cab961ebcadb0ad3fc9ed7d3fb9b0d135a2a71` |
-| 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,987,038 字节 |
-| 内含 recovery 本体 | 9,044,496 字节，AArch64 ELF（另含 `system/bin/snapuserd` 1,273,320 字节，读压缩快照用） |
+| SHA-256 | `4a504c2151fe3928a491cb9ea47d5c6b4048718a6316c70c47eafe57350c83ad` |
+| 形状 | `ANDROID!`、header_version 4、kernel 0、ramdisk 51,988,960 字节 |
+| 内含 recovery 本体 | 9,047,864 字节，AArch64 ELF（另含 `system/bin/snapuserd` 1,273,320 字节，读压缩快照用） |
 | 底包 | OS4.0.4.0.XOACNXM，recovery 分区 SHA-256 `55f491052a360bc15362fd80c8bd2dd0912b289e1653f2bd7f9c5a12e7fea27b`（打包器自行核对） |
 
 结构审计（`tools/audit-image.py`）32 项全过：boot 头、ramdisk 解包为 newc 并以
@@ -477,3 +477,21 @@ user 0 不再出现在"文件仍关着"的列表里（只剩 user 999）
   保持只跟随、不接管。
 
 UI 测试 386 项全过（含新增"压缩更新同样滑动合并"）。
+**同步了上游 kirklin/skyward 的三个修复**（2026-11-20）
+
+上游发布了 0.3.1（我们 fork 自 0.2.2，其间上游领先 24 个提交）。其中大部分我们已有
+同源提交（cherry-pick 过或独立实现），真正缺的是三个通用修复，已逐个核对后同步：
+
+| 上游提交 | 内容 | 与我们的适配 |
+| --- | --- | --- |
+| `c5e09f6` | 模块加载后创建的文件要**等它出现**再移交 | 保留我们的 5 秒 `FILES_MADE` 常量；改用上游放在 `skyward-sys` 的 `wait_file`（带超时消息），删掉 main.rs 里的本地重复实现 |
+| `37ef67e` | recovery 服务**再次启动时唤醒触摸屏**：面板先休眠再用暗帧唤醒，控制器休眠时不响应设置 | 合入唤醒序列；保留我们的双击唤醒参数（`double_tap`，本机配置在用）；去掉上游的 `eprintln` 调试行 |
+| `2ea0065` | 电池/系统属性**读取失败时页面保持**，不整页崩溃 | 全部合入；冲突中被吞掉的 `ToldOnce` 测试已手动补回 |
+
+**没有合并的部分**（有意）：
+
+- 上游 0.3 的 UI 重构（`app.rs` 拆成 27 个模块）：与我们 355 个提交深度冲突，
+  机械合并必然丢改动；要跟需要一次专门的重定向工作，不在这次范围
+- `devices/` 其他机型配置：恢复上游的 `dada/ishtar/nezha` 三个文件（它们带修复），
+  我们的 `xuanyuan.toml` 不受影响
+- slides/ 文档图片：上游新增，无冲突，随后续合并带上
