@@ -1,4 +1,4 @@
-﻿# 晚上的真机验证: Skyward 自装 OTA + 压缩快照合并
+# 晚上的真机验证: Skyward 自装 OTA + 压缩快照合并
 # 用法: 手机进入 recovery 后, 在 PC 上运行:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File verify-ota.ps1 -Package <完整包.zip>
 # 前提: PC 上已有完整更新包 (10.4 GB 的 zip)
@@ -11,7 +11,7 @@ param(
 
 $adb = 'C:\platform-tools\adb.exe'
 $fastboot = 'C:\platform-tools\fastboot.exe'
-$img = 'D:\文件\work\build\skyward-v1.1.0-xuanyuan-OS4.0.4.0.XOACNXM.img'
+$img = 'D:\文件\work\build\skyward-v0.3.1-beta1-xuanyuan-OS4.0.4.0.XOACNXM.img'
 $expect = '7fe901e8e2cb762c2ed3ad19c5cab961ebcadb0ad3fc9ed7d3fb9b0d135a2a71'
 
 function Step($m) { Write-Output ""; Write-Output "=== $m ===" }

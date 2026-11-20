@@ -190,7 +190,7 @@ pub fn verified(l: Lang, state: &str) -> String {
     let text = match state {
         "green" => ["绿色 · 已通过官方密钥验证", "綠色 · 已通過官方金鑰驗證", "Green · Verified with the official key"],
         "yellow" => ["黄色 · 已通过自定义密钥验证", "黃色 · 已通過自訂金鑰驗證", "Yellow · Verified with a custom key"],
-        "orange" => ["橙色 · 设备已解锁，不验证系统", "橙色 · 裝置已解鎖，不驗證系統", "Orange · Unlocked, so the system isn't verified"],
+        "orange" => ["橙色 · 设备已解锁，系统未受验证保护", "橙色 · 裝置已解鎖，系統未受驗證保護", "Orange · Unlocked, so the system is not protected by verification"],
         "red" => ["红色 · 验证失败", "紅色 · 驗證失敗", "Red · Verification failed"],
         other => return other.to_string(),
     };
@@ -1588,7 +1588,7 @@ mod tests {
         assert_eq!(model_lines("Xiaomi 17 Ultra by Leica"), "Xiaomi 17 Ultra\nby Leica");
         assert_eq!(model_lines("Xiaomi 17 Ultra"), "Xiaomi 17 Ultra");
         assert_eq!(inches(6.9), "6.9″");
-        assert_eq!(verified(HANS, "orange"), "橙色 · 设备已解锁，不验证系统");
+        assert_eq!(verified(HANS, "orange"), "橙色 · 设备已解锁，系统未受验证保护");
         assert_eq!(health(Lang::En, "Watchdog timer expire"), "Watchdog timer expire");
     }
 

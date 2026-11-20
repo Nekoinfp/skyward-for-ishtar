@@ -2326,8 +2326,18 @@ pub fn version_line(t: &Theme, f: &Fonts, text: &str) -> Sprite {
     hero_line(t, f, text, 0.0)
 }
 
-/// How far below the version, in dp, the author's line stands.
-const AUTHOR_BELOW_DP: f32 = 19.0;
+/// How far below the version, in dp, the line naming what this build is for
+/// stands.
+const BY_BELOW_DP: f32 = 19.0;
+
+/// What this build is for, a line under the version in its type.
+pub fn by_line(t: &Theme, f: &Fonts, text: &str) -> Sprite {
+    hero_line(t, f, text, t.m.dp(BY_BELOW_DP))
+}
+
+/// How far below the version, in dp, the author's line stands: under the
+/// line naming what the build is for.
+const AUTHOR_BELOW_DP: f32 = 38.0;
 
 /// Who made the recovery, a line under the version in its type.
 pub fn author_line(t: &Theme, f: &Fonts, text: &str) -> Sprite {

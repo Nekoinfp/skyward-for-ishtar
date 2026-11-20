@@ -2238,7 +2238,7 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "skyward"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2271,7 +2271,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-backup"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "libc",
@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-binder"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "libc",
@@ -2294,7 +2294,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-block"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "libc",
@@ -2305,7 +2305,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-bootimg"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "abootimg-oxide",
  "anyhow",
@@ -2317,7 +2317,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-config"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "serde",
@@ -2326,7 +2326,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-crypto"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-files"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "libc",
@@ -2350,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-info"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "libc",
@@ -2364,7 +2364,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-install"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "abootimg-oxide",
  "anyhow",
@@ -2396,7 +2396,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-lp"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "sha2 0.10.9",
@@ -2405,7 +2405,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-modules"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "libc",
@@ -2414,7 +2414,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-mtp"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "jiff",
@@ -2426,7 +2426,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-net"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "aes",
  "anyhow",
@@ -2446,7 +2446,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-omapi"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "skyward-binder",
@@ -2455,7 +2455,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-pack"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2469,14 +2469,14 @@ dependencies = [
 
 [[package]]
 name = "skyward-permissive-init"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "skyward-preview"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "png",
@@ -2493,7 +2493,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-sys"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "libc",
@@ -2503,7 +2503,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-system-init"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "libc",
@@ -2516,7 +2516,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-systems"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "abootimg-oxide",
  "anyhow",
@@ -2534,7 +2534,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-ui"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "ab_glyph",
  "ab_glyph_rasterizer",
@@ -2564,7 +2564,7 @@ dependencies = [
 
 [[package]]
 name = "skyward-vab"
-version = "1.1.0"
+version = "0.3.1-beta1"
 dependencies = [
  "anyhow",
  "libc",
