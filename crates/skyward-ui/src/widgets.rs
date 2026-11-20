@@ -1286,6 +1286,21 @@ pub fn footnote(c: &mut Canvas, t: &Theme, f: &Fonts, y: f32, text: &str) -> f32
     top
 }
 
+/// A red warning below a card, for something the owner has to see before
+/// going further: a footnote that cannot be mistaken for a feature.
+pub fn warning(c: &mut Canvas, t: &Theme, f: &Fonts, y: f32, text: &str) -> f32 {
+    let m = &t.m;
+    let x = m.title_x + m.dp(0.9);
+    let max_w = m.w as f32 - x - m.title_x;
+    let lines = wrap(c, &f.value, text, m.sub_px, max_w);
+    let mut top = y + m.dp(10.0);
+    for line in &lines {
+        c.text_top(&f.value, line, x, top, m.sub_px, t.pal.danger, None);
+        top += m.sub_pitch;
+    }
+    top
+}
+
 /// Body text set on the page itself, as a licence or notice reads,
 /// wrapped to the content width; a blank line starts a new paragraph.
 /// Returns where the text ends.

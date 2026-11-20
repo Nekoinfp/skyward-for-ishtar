@@ -1083,6 +1083,17 @@ pub fn install(cx: &Ctx) -> Frame {
     let sideload = l.pick(["在电脑上运行 adb sideload", "在電腦上執行 adb sideload", "Run adb sideload on the computer"]);
     rows.push(Row::new(install_title(l, Source::Computer)).icon(GREEN, Icon::Usb).subtitle(sideload));
     let methods = widgets::list(&mut c, t, f, y, &rows);
+    // A full official package installed from a recovery is a special case on
+    // this generation of phone: the package rewrites boot and vbmeta as it
+    // goes, and the bootloader's own signature check then refuses what was
+    // just installed. The owner has to know before picking the package, not
+    // after the phone will not start.
+    let ota_warning = l.pick([
+        "注意：在 recovery 中安装官方完整包大概率导致无法开机（卡米）。建议仅在系统内更新。",
+        "注意：在 recovery 中安裝官方完整包大概率導致無法開機（卡米）。建議僅在系統內更新。",
+        "Warning: installing an official full package from recovery very likely leaves the phone unbootable. Update from within the system instead."
+    ]);
+    let y = widgets::warning(&mut c, t, f, methods.bottom, ota_warning);
     let from_usb = Action::Open(Screen::Choose(Place::UsbDrive));
     let mut out = hits(&methods.rows[methods.rows.len() - 3..], &[from_storage, from_usb, Action::Sideload]);
     // A phone that can hold a second system installs one from here too.
@@ -1098,7 +1109,11 @@ pub fn install(cx: &Ctx) -> Frame {
             "Installs A/B full OTA packages and flashable zips with an install script, and flashes boot, init_boot, vendor_boot, recovery, dtbo and vbmeta partition images. A system update installs to the other slot, which starts after a reboot. Choosing a file lists only folders and .zip and .img files.",
         ],
     });
-    let y = widgets::footnote(&mut c, t, f, methods.bottom, what);
+    // The warning is its own paragraph, not a footnote to the list: it has
+    // to stand apart from what the list does, so the description of what
+    // this page installs comes after a gap of its own.
+    let y = y + t.m.dp(8.0);
+    let y = widgets::footnote(&mut c, t, f, y, what);
     let y = widgets::section(&mut c, t, f, y, l.pick(["选项", "選項", "Options"]));
     let check = Row::new(l.pick(["验证刷机包签名", "驗證刷機包簽章", "Verify zip signatures"])).switch(cx.state.check_signature);
     let signature = widgets::list(&mut c, t, f, y, &[check]);
