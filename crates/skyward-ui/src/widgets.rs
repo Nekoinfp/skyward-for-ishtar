@@ -2309,7 +2309,14 @@ pub fn wordmark(t: &Theme, f: &Fonts, text: &str, cap_top: f32, px: f32) -> Spri
     let x = (t.m.w as f32 - w) / 2.0;
     let pad = t.m.dp(4.0);
     let (left, top) = (x - pad, cap_top - px * 0.4);
-    Sprite::capture(left, top, (w + pad * 2.0).ceil() as u32, (px * 1.6).ceil() as u32, |c, dx, dy| {
+    // The lettering's own extent, from its face: a glyph with a deep tail —
+    // the y of the wordmark — reaches below what a share of the em promises,
+    // and cutting it there leaves the field showing through the cut as if the
+    // glyph itself were broken. The face is asked how far the text's ink
+    // reaches and the box is sized by that, with room to spare.
+    let (_, descent) = face.line(px);
+    let box_h = (px * 0.4 + face.cap(px) + descent + pad).ceil() as u32;
+    Sprite::capture(left, top, (w + pad * 2.0).ceil() as u32, box_h, |c, dx, dy| {
         c.text(face, text, x + dx, cap_top + face.cap(px) + dy, px, Rgba::rgb(0, 0, 0), None);
     })
 }
