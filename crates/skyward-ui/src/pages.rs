@@ -1088,12 +1088,7 @@ pub fn install(cx: &Ctx) -> Frame {
     // goes, and the bootloader's own signature check then refuses what was
     // just installed. The owner has to know before picking the package, not
     // after the phone will not start.
-    let ota_warning = l.pick([
-        "注意：在 recovery 中安装官方完整包大概率导致无法开机（卡米）。建议仅在系统内更新。",
-        "注意：在 recovery 中安裝官方完整包大概率導致無法開機（卡米）。建議僅在系統內更新。",
-        "Warning: installing an official full package from recovery very likely leaves the phone unbootable. Update from within the system instead."
-    ]);
-    let y = widgets::warning(&mut c, t, f, methods.bottom, ota_warning);
+    let y = widgets::warning(&mut c, t, f, methods.bottom, l.pick(OTA_WARNING));
     let from_usb = Action::Open(Screen::Choose(Place::UsbDrive));
     let mut out = hits(&methods.rows[methods.rows.len() - 3..], &[from_storage, from_usb, Action::Sideload]);
     // A phone that can hold a second system installs one from here too.
@@ -1153,6 +1148,20 @@ pub fn install(cx: &Ctx) -> Frame {
 }
 
 const SECURITY_PATCH: Text = ["安全补丁", "安全性修補程式", "Security patch"];
+
+/// What installing an official full package from this recovery costs on this
+/// generation of phone: the package rewrites boot and vbmeta, and the
+/// bootloader's own signature check then refuses what was just installed.
+///
+/// It is said on both pages that lead to an install — the install page, where
+/// a package is picked, and the system update page, where one is downloaded —
+/// because the owner has to know before choosing, not after the phone will not
+/// start. One constant so the two can never drift apart.
+const OTA_WARNING: Text = [
+    "注意：在 recovery 中安装官方完整包大概率导致系统卡米，请在系统内完成更新。",
+    "注意：在 recovery 中安裝官方完整包大概率導致系統卡米，請在系統內完成更新。",
+    "Warning: installing an official full package from recovery very likely leaves the system unable to boot. Update from within the system instead.",
+];
 
 /// How installing from `source` is named: on the install page, and as the
 /// title of the page that installs.
@@ -2973,6 +2982,9 @@ pub fn update(cx: &Ctx) -> Frame {
         return Frame::new(t, fit(c, t, y), out, l.pick(UPDATE), top);
     }
     let mut y = top;
+    // The same warning the install page carries: this page downloads a full
+    // official package too, and hands it to the same installer.
+    y = widgets::warning(&mut c, t, f, y, l.pick(OTA_WARNING));
     if let Some(v) = &i.os_version {
         y = widgets::section_first(&mut c, t, f, y, l.pick(["本机", "本機", "This phone"]));
         y = widgets::info_card(&mut c, t, f, y, &[(l.pick(["当前版本", "目前版本", "Current version"]), v.clone())]);
