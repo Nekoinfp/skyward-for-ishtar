@@ -1252,9 +1252,22 @@ fn reflashed(c: &mut Canvas, cx: &Ctx, y: f32) -> f32 {
             widgets::footnote(c, t, f, y, &said)
         }
         Some(Reflash::Failed(why)) => {
+            // The install finished, but this recovery did not go back where
+            // the package wrote over it: the phone may well start into the
+            // stock recovery next, and on this generation of phone the
+            // bootloader's own check of what it starts can refuse the new
+            // system outright. Saying so is not a courtesy — it is the
+            // difference between an owner who reboots into a surprise and
+            // one who reboots knowing what to expect.
             let note = l.pick(["未能将 Skyward 重新刷入 recovery 分区。", "無法將 Skyward 重新刷入 recovery 分割區。", "Couldn't flash Skyward back into the recovery partitions."]);
             let y = widgets::footnote(c, t, f, y, note);
-            widgets::footnote(c, t, f, y, why)
+            let y = widgets::footnote(c, t, f, y, why);
+            let warning = l.pick([
+                "警告：下次启动可能进入原厂 recovery，或无法启动。建议先用 fastboot 备份并刷回 boot 与 vbmeta。",
+                "警告：下次啟動可能進入原廠 recovery，或無法啟動。建議先用 fastboot 備份並刷回 boot 與 vbmeta。",
+                "Warning: the next start may enter the stock recovery, or fail to start. Back up and reflash boot and vbmeta with fastboot first."
+            ]);
+            widgets::footnote(c, t, f, y, warning)
         }
     }
 }
