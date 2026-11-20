@@ -533,3 +533,21 @@ UI 测试 386 项全过（含新增"压缩更新同样滑动合并"）。
 
 **未验证的假设**：如果安装前 `disable_avb` 已开启且 vbmeta 的 `disable-verification`
 已置位，是否仍会被拒绝？需要一次带这个前提的实测。
+
+---
+
+**卡米后的完整救回路径**（2026-11-21 真机走通，记下来备用）
+
+实测从"两槽 successful=no、retry 耗尽、连 recovery 都进不去、只回 fastboot"
+到系统完全恢复：
+
+1. `fastboot flash boot_a <root 备份>`、`boot_b` 同一镜像——**boot 是关键**，
+   vbmeta 不必刷（解 bootloader 上对 boot 的校验靠的是刷入与 vbmeta 匹配过的镜像，
+   或直接刷回曾经启动过的那份）；
+2. `fastboot set_active a` 重置槽计数；
+3. `fastboot reboot` 进系统——**15 秒起机**，`/data` 477G 完整、607 个应用数据在；
+4. root 由 Magisk 备份 boot 带回：`context=u:r:magisk:s0`。
+
+**另一个实测发现**：recovery 刚启动时 `skyward check` 可能报
+`NOT registered: keymint`——那是服务重启中的暂时态，几秒后重跑即注册。
+**check 跑太早会误报**，不是缺陷。
