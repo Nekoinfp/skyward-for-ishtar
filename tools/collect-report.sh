@@ -1,5 +1,5 @@
 #!/bin/sh
-# Gather, from a computer with adb, what tells why a xuanyuan's recovery is not
+# Gather, from a computer with adb, what tells why an ishtar's recovery is not
 # behaving: the phone in recovery, `adb devices` showing it, then
 #
 #   tools/collect-report.sh [report.txt]
@@ -8,7 +8,7 @@
 # cannot answer still leaves the rest in the file.
 set -u
 
-out=${1:-"xuanyuan-report-$(date +%Y%m%d-%H%M%S).txt"}
+out=${1:-"ishtar-report-$(date +%Y%m%d-%H%M%S).txt"}
 : > "$out"
 
 say() {

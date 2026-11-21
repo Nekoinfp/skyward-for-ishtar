@@ -4,15 +4,15 @@
 # built on, the packed image's structure, and — with the phone's own
 # partitions to hand — every path and module the configuration names.
 #
-#   tools/verify.sh --config devices/xuanyuan.toml
-#   tools/verify.sh --config devices/xuanyuan.toml --firmware /path/to/parts
+#   tools/verify.sh --config devices/ishtar.toml
+#   tools/verify.sh --config devices/ishtar.toml --firmware /path/to/parts
 #
 # The firmware directory holds partitions taken out of the phone's package and
 # mounted (or unpacked): vendor/, odm/, vendor_dlkm/, system_dlkm/. Root is
 # needed to mount them; nothing here writes to a phone.
 set -u
 
-config=devices/xuanyuan.toml
+config=devices/ishtar.toml
 firmware=""
 image=""
 while [ $# -gt 0 ]; do

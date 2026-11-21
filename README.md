@@ -1,69 +1,116 @@
-# Skyward for Xiaomi 15 Ultra (xuanyuan)
+# Skyward for Xiaomi 13 Ultra (ishtar)
 
 Skyward 是一个用 Rust 写的第三方 recovery。
 
-本项目是 **小米 15 Ultra（xuanyuan）、澎湃 OS 4.0.4.0（OS4.0.4.0.XOACNXM）** 的适配版本。
+本项目是 **小米 13 Ultra（ishtar）、澎湃 OS 4.0.29（`OS4.0.29.0.XEOCNXM`）** 的适配版本。
 
 - 上游：[kirklin/skyward](https://github.com/kirklin/skyward) 0.3.1
 - 本版本：**0.3.1-beta1**
-- 目标机型：Xiaomi 15 Ultra（`25019PNF3C` / `25010PN30C`）
-- 测试系统：OS4.0.4.0.XOACNXM（Android 17 / SDK 37 + vendor SDK 35）
+- 目标机型：Xiaomi 13 Ultra（`2304FPN6DC`）
+- 测试系统：OS4.0.29.0.XEOCNXM（Android 17 / SDK 37）
+- 底包：OS3.0.308.0.WMACNXM 原厂 recovery
+  （`ed63e2d3cbb1b06a15579f5384c87e7d80505e44140b3a767f5034d532a3568a`）
 
-> ⚠️ **测试版**。已经在一台真机上逐项验证过下面列出的功能，
-> 刷入前请自己备份原厂 recovery。
+> ⚠️ **测试版**。已经在一台真机上点亮、触摸、120 Hz 与全套密钥服务，
+> 但**用户数据（CE）还没有解开过**。刷入前请自己备份原厂 recovery。
 
 ---
 
+## 这台手机和 15 Ultra 不一样的地方
+
+Skyward 的构造方式是在手机自己的原厂 recovery 上重建：内核、`init`、`adbd`、
+SELinux 策略、库都是原厂的，只把 `system/bin/recovery` 换成 Skyward 本体。
+所以换机型只需要换描述，但这台手机的描述与 15 Ultra 有四处实质差异：
+
+| | 13 Ultra（ishtar） | 15 Ultra（xuanyuan） |
+| --- | --- | --- |
+| 触摸 | ST FTS over SPI（`fts_touch_spi`），走 `touch_report` | Synaptics TouchComm |
+| 屏幕 | 1440×3200，密度 560，120 Hz | 1440×3200，密度 600 |
+| 密钥服务 | **HIDL**：gatekeeper/boot/安全元件都走 `hwbinder` | 全 AIDL |
+| weaver | **没有独立进程**，由 keymint 的 AIDL 实现回答 | odm 上的 thales |
+| snapuserd | 原厂 recovery **自带** | 原厂没有，打包时补进去 |
+
+HIDL 这一条是适配的主要难点：recovery 里没有 `hwservicemanager`，
+而 HIDL 服务没有它就没有注册中心。Android 从 `system_ext` 跑它，
+本适配把它作为手机自己的一个程序启动。
+
 ## 已验证的功能
 
-在真实设备上逐项跑过：
+在真机上跑过：
 
-- **`/data` 完整解密**：输入锁屏 PIN 后，设备加密（DE）与用户加密（CE）都打开——
-  `/data/data` 可读、`/sdcard` 可读。这是本适配修好的核心问题。
-- **压缩快照读取**：系统更新后产生的 9 个 lz4 用户态快照，全部挂载成功，
-  六个密钥服务从快照里的分区正常注册。
-- **界面、屏幕、触摸、WLAN**：都可用。
-- **解密后查看文件、备份/恢复、终端、挂载管理**等页面功能。
-- **安装**：`adb sideload`、内部存储、U 盘三种来源；可一次选多个 zip/img 依次安装；
-  刷单个 `.img` 时可选择只刷指定分区（boot / init_boot / vendor_boot / recovery /
-  dtbo / vbmeta）与槽位。
-- **逻辑分区扩容规划**：`skyward lp --plan-grow` 只读地算一遍能不能扩（见下面"已知限制"）。
+- **点亮与界面**：主页、设置页、中文排版全部正常
+- **触摸**：可用
+- **120 Hz**：面板的 `1440x3200x120cmd@120x60auto` 模式，`fastest_refresh = true`
+- **九分区挂载**：system / system_ext / vendor / odm / product / mi_ext 等
+- **密钥链全部就绪**：hwservicemanager、qseecomd、ssgtzd、keymint、
+  gatekeeper、安全元件六个进程在跑
+  - `skyward gatekeeper` 实测应答：*"the secure world does not recognise
+    that credential"*——安全世界在工作
+  - `skyward keymint` 应答 HAL 4 version 4
+- **`/data` 设备加密（DE）解开**：`/data` 挂载为 `dm-9`，62 个顶层条目，
+  `/data/data` 592 个应用目录可读
+- **浏览器**：入口在「双系统」下方，能读网页、显示图片
+
+## 还没验证的
+
+- **用户加密（CE）**：`/sdcard` 与各用户自己的文件仍锁着，需要锁屏 PIN。
+  输入后能否解开尚未确认——密钥链已就绪，但没试过真的凭据。
+- **WLAN**：`qca_cld3_kiwi_v2` 走 `cnss2`，未验证
+- **压缩快照读取**：原厂 recovery 自带 snapuserd，未验证
 
 ## 已知限制
 
-- **不要在 recovery 里装官方完整包**。在 Skyward（或任何第三方 recovery）里刷官方
-  完整 OTA，装完后大概率卡米：安装本身是成功的，但更新包会把 boot 与 vbmeta 刷成
-  原厂，而自 os4 后小米的 bootloader 有自己的签名校验，`disable-verification` 标志
-  绕不过去。装完两个槽都会变成"不可启动"，连 recovery 都进不去，只剩 fastboot。
-  **请始终在系统里更新**（设置 → 系统更新）。安装页与系统更新页都已用红字标明这条。
-  （如果变砖保数据，请线刷官方完整包）
-- **压缩快照的合并**没有开启。`skyward merge --compressed` 会逐分区驱动手机的
-  snapuserd 合并，但实测 9 个分区里只有 1 个（COW 在 super 里那个）能完成，其余停在
-  `snapshot-merge`。退路是可靠的：重启进系统，系统会在一分钟内自己合并完。
-- **逻辑分区就地扩容做不到**。这台手机的 super 元数据里没有对齐的空闲区（唯一空洞
-  1 MB），要扩必须搬 extent，而 `grow` 按设计不移动别人的扇区。OTA 不受影响。
-- **增量更新包与非 A/B 更新包未实现**（前者等上游发布新版本可测，后者这台机器用不上）。
+- **不要在 recovery 里装官方完整包**，大概率卡米。请在系统内更新。
+- **压缩快照的合并**没开启；退路是重启进系统，系统会自己合并。
+- **逻辑分区就地扩容**做不到（super 里没有对齐的空闲区）。
 
 ---
 
 ## 安装
 
-手机进入 fastboot 刷入镜像即可。
+手机进入 fastboot 刷入镜像即可。两个槽都刷，避免某次重启回落到旧的那一份：
 
 ```bash
-fastboot flash recovery_a skyward-v0.3.1-beta1-xuanyuan-OS4.0.4.0.XOACNXM.img
-fastboot flash recovery_b skyward-v0.3.1-beta1-xuanyuan-OS4.0.4.0.XOACNXM.img
+fastboot flash recovery_a skyward-v0.3.1-beta1-ishtar-OS3.0.308.0.WMACNXM.img
+fastboot flash recovery_b skyward-v0.3.1-beta1-ishtar-OS3.0.308.0.WMACNXM.img
 fastboot reboot recovery
 ```
 
-下载见 [Releases](https://github.com/Nekoinfp/skyward-for-xuannyuan/releases)。
+进 recovery 后到「解密」页输入锁屏 PIN，`/data` 与内部存储就都能读。
 
-校验（可选）：
+### 底包必须对上
+
+底包是 **OS3.0.308.0.WMACNXM**（这台手机的 vendor 分区就是它）。
+手机如果跑的是别的版本，应当用它自己那一份 recovery 重打包：
 
 ```bash
-sha256sum skyward-v0.3.1-beta1-xuanyuan-OS4.0.4.0.XOACNXM.img
-# 84bf36e7d2431034035948faf5d0243f9ce150d596a2d3dbd7f670f8ae22000c
+adb shell su -c 'dd if=/dev/block/bootdevice/by-name/recovery of=/sdcard/recovery.img'
+adb pull /sdcard/recovery.img
 ```
+
+---
+
+## 从源码打包
+
+```bash
+# 底包：只取 recovery 分区，按需读，不下载整个 7.5 GB 包
+target/release/skyward-pack stock --config devices/ishtar.toml --out stock/recovery.img
+
+# 镜像
+target/release/skyward-pack recovery \
+    --stock stock/recovery.img \
+    --binary target/aarch64-linux-android/release/skyward \
+    --system-init target/system-init/aarch64-linux-android/release/system-init \
+    --permissive-init target/system-init/aarch64-linux-android/release/permissive-init \
+    --config devices/ishtar.toml \
+    --font resources/fonts/MiSansVF.ttf \
+    --mono resources/fonts/KirkMono-Regular.ttf \
+    --mono-license resources/fonts/KirkMono-OFL.txt \
+    --omapi resources/omapi \
+    --out out/skyward-ishtar.img
+```
+
+不需要 `--snapuserd`：这台手机的原厂 recovery 里本来就有，打包器会拒绝重复添加。
 
 ---
 
@@ -74,3 +121,5 @@ sha256sum skyward-v0.3.1-beta1-xuanyuan-OS4.0.4.0.XOACNXM.img
 上游仓库：[kirklin/skyward](https://github.com/kirklin/skyward) —— 绝大多数设计与代码来自这里。
 
 界面字体 MiSans（小米，SIL OFL 1.1），终端等宽字体 Kirk Mono（SIL OFL 1.1）。
+
+15 Ultra 的适配（本项目的代码基础）：[skyward-for-xuannyuan](https://github.com/Nekoinfp/skyward-for-xuannyuan)。
