@@ -6,12 +6,12 @@ use anyhow::{bail, ensure, Context, Result};
 use serde::Deserialize;
 
 /// The repository this fork's releases are published in. This fork is the
-/// Xiaomi 15 Ultra (xuanyuan) alone, so it looks at its own releases and
+/// Xiaomi 13 Ultra (ishtar) alone, so it looks at its own releases and
 /// nowhere else.
-pub const REPOSITORY: &str = "zhouzt0121/skyward";
+pub const REPOSITORY: &str = "Nekoinfp/skyward-for-ishtar";
 
 /// Where GitHub answers which release of this fork is the newest.
-pub const LATEST: &str = "https://api.github.com/repos/zhouzt0121/skyward/releases/latest";
+pub const LATEST: &str = "https://api.github.com/repos/Nekoinfp/skyward-for-ishtar/releases/latest";
 
 /// The version of GitHub's API the answer is read as.
 const API_VERSION: &str = "2022-11-28";

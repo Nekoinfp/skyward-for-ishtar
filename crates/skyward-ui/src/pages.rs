@@ -638,7 +638,7 @@ const AUTHOR: &str = "© 2026 Kirk Lin & ppy";
 
 /// What this build is for, as the About page says under its version: the
 /// recovery adapted to this phone.
-const BY: &str = "Skyward for xuanyuan";
+const BY: &str = "Skyward for ishtar";
 
 /// About this device, modelled on the stock「我的设备」: the wordmark, the
 /// version and its author over a moving colour field, and the summary,
