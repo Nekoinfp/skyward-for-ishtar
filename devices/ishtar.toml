@@ -23,6 +23,9 @@ width = 1440
 height = 3200
 density = 560
 diagonal = 6.73
+# The panel is a 120 Hz one and KMS offers ten modes; the fastest is taken
+# once the panel is up, which is what the phone's own system does.
+fastest_refresh = true
 # rounded_corner_radius in the system's DevicesAndroidOverlay.
 corner_radius = 140
 
