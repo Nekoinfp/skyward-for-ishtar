@@ -7050,7 +7050,9 @@ impl App {
                     *slot = page.url.clone();
                 }
                 let document = match page.content {
-                    skyward_net::browse::Content::Html => browser::read(&page.body, &page.url),
+                    // A page's rows of links are read as rows: without a
+                    // stylesheet to lay them across, each would take a line.
+                    skyward_net::browse::Content::Html => browser::compact(browser::read(&page.body, &page.url)),
                     skyward_net::browse::Content::Text => browser::from_text(&page.body),
                     skyward_net::browse::Content::Other(kind) => browser::Document {
                         title: String::new(),

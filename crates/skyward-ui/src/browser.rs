@@ -332,6 +332,16 @@ fn element(b: &mut Building, name: &str, closing: bool, tag: &str, base: &str) {
         }
         "a" => {
             b.flush_text();
+            // Two links side by side with nothing between them run their
+            // words together: a page that lays them out with a stylesheet
+            // leaves no space to separate them, and without one they read as
+            // one word. A space goes between.
+            if !closing
+                && b.link.is_none()
+                && b.spans.last().is_some_and(|span| span.link.is_some() && !span.text.ends_with(' '))
+            {
+                b.spans.push(Span { text: " ".to_string(), link: None, bold: false, italic: false });
+            }
             b.link = if closing { None } else { attribute(tag, "href").map(|href| resolve(base, &href)) };
         }
         "b" | "strong" => {
@@ -654,6 +664,65 @@ pub fn resolve(base: &str, href: &str) -> String {
     format!("{scheme}://{authority}{folder}{href}")
 }
 
+/// How short a one-link block has to be to be read as part of a row.
+const SHORT_LINK_CHARS: usize = 12;
+
+/// How many such blocks in a row make a row worth joining.
+const LEAST_IN_A_ROW: usize = 3;
+
+/// Runs of one-link blocks joined into one line each.
+///
+/// A page writes its navigation as a row of links and lays them across with a
+/// stylesheet. Read without one, every link takes a line of its own: eight of
+/// them fill the screen with eight words and push the page itself off it. A
+/// run of short one-link blocks is therefore read as one paragraph, its links
+/// side by side, which is what the page meant.
+pub fn compact(doc: Document) -> Document {
+    let mut out: Vec<Block> = Vec::with_capacity(doc.blocks.len());
+    let mut run: Vec<Span> = Vec::new();
+    let mut count = 0usize;
+    let close = |run: &mut Vec<Span>, count: usize, out: &mut Vec<Block>| {
+        if count == 0 {
+            return;
+        }
+        let spans = std::mem::take(run);
+        if count >= LEAST_IN_A_ROW {
+            out.push(Block::Para(spans));
+        } else {
+            // Too few to be a row: each goes back to standing alone, which is
+            // what it was.
+            for span in spans.into_iter().filter(|span| span.link.is_some()) {
+                out.push(Block::Para(vec![span]));
+            }
+        }
+    };
+    for block in doc.blocks {
+        let short = match &block {
+            Block::Para(spans) if spans.len() == 1 => {
+                let span = &spans[0];
+                let text = span.text.trim();
+                (span.link.is_some() && !text.is_empty() && text.chars().count() <= SHORT_LINK_CHARS).then(|| span.clone())
+            }
+            _ => None,
+        };
+        match short {
+            Some(span) => {
+                if count > 0 {
+                    run.push(Span { text: "  ".to_string(), link: None, bold: false, italic: false });
+                }
+                run.push(span);
+                count += 1;
+            }
+            None => {
+                close(&mut run, count, &mut out);
+                count = 0;
+                out.push(block);
+            }
+        }
+    }
+    close(&mut run, count, &mut out);
+    Document { title: doc.title, blocks: out }
+}
 /// The last part of an address, which is what a file is called: the name a
 /// video is offered under when the page gives it none.
 pub fn file_name_of(url: &str) -> String {
@@ -1025,6 +1094,53 @@ fn words_of(text: &str) -> Vec<String> {
         assert_eq!(file_name_of("https://example.com/a%20b.mp4"), "a b.mp4");
         assert_eq!(file_name_of("https://example.com/"), "example.com", "an address with no file is named by its host");
         assert_eq!(file_name_of("https://example.com"), "example.com");
+    }
+
+    #[test]
+    fn links_set_side_by_side_do_not_run_into_one_word() {
+        let html = r#"<p><a href="/1">首页</a><a href="/2">番剧</a><a href="/3">直播</a></p>"#;
+        let doc = read(html, "https://example.com/");
+        let Block::Para(spans) = &doc.blocks[0] else { panic!("a paragraph: {:?}", doc.blocks) };
+        assert_eq!(spans_text(spans), "首页 番剧 直播", "spans: {spans:?}");
+        // And each still leads where it said.
+        let links: Vec<&str> = spans.iter().filter_map(|s| s.link.as_deref()).collect();
+        assert_eq!(links, vec!["https://example.com/1", "https://example.com/2", "https://example.com/3"]);
+    }
+
+    #[test]
+    fn a_row_of_short_links_is_read_as_one_line() {
+        let html = r#"<div><a href="/1">首页</a></div><div><a href="/2">番剧</a></div>
+            <div><a href="/3">直播</a></div><div><a href="/4">游戏中心</a></div>"#;
+        let doc = compact(read(html, "https://example.com/"));
+        assert_eq!(doc.blocks.len(), 1, "four links, one line: {:?}", doc.blocks);
+        let Block::Para(spans) = &doc.blocks[0] else { panic!("a paragraph") };
+        assert_eq!(spans_text(spans), "首页  番剧  直播  游戏中心", "spans: {spans:?}");
+        assert_eq!(spans.iter().filter(|s| s.link.is_some()).count(), 4, "each still leads where it said");
+    }
+
+    #[test]
+    fn a_pair_of_links_is_left_standing_alone() {
+        let html = r#"<div><a href="/1">one</a></div><div><a href="/2">two</a></div>"#;
+        let doc = compact(read(html, "https://example.com/"));
+        assert_eq!(doc.blocks.len(), 2, "two is not a row: {:?}", doc.blocks);
+    }
+
+    #[test]
+    fn a_long_link_is_not_pulled_into_a_row() {
+        let text = "这一行文字相当长，不该被当成导航里的一项";
+        let html = format!(
+            r#"<div><a href="/1">首页</a></div><div><a href="/2">番剧</a></div><div><a href="/3">{text}</a></div>"#
+        );
+        let doc = compact(read(&html, "https://example.com/"));
+        assert!(doc.blocks.len() > 1, "the long one stands alone: {:?}", doc.blocks);
+    }
+
+    #[test]
+    fn a_paragraph_of_words_is_not_touched_by_compacting() {
+        let doc = compact(read("<p>Just a sentence with a <a href=\"/x\">link</a> in it.</p>", "https://example.com/"));
+        assert_eq!(doc.blocks.len(), 1);
+        let Block::Para(spans) = &doc.blocks[0] else { panic!("a paragraph") };
+        assert_eq!(spans_text(spans), "Just a sentence with a link in it.");
     }
 #[cfg(test)]
 mod layout_tests {
