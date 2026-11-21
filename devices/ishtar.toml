@@ -146,28 +146,35 @@ sockets = [
 user = "system"
 groups = ["system", "oem_2912"]
 
+# AIDL, so it registers through /dev/binder and needs no hardware directory.
 [[service]]
 path = "/vendor/bin/hw/android.hardware.security.keymint-service-qti"
+ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
 libraries = ["/system/lib64", "/vendor/lib64"]
 
+# HIDL: it registers through hwbinder, which the hardware directory makes.
 [[service]]
 path = "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti"
+ready_hardware_service = "android.hardware.gatekeeper@1.0::IGatekeeper/default"
 libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw"]
 user = "root"
 groups = ["system"]
 
 [[service]]
 path = "/vendor/bin/hw/vendor.qti.secure_element@1.2-service"
+ready_hardware_service = "android.hardware.secure_element@1.2::ISecureElement/eSE1"
 libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw"]
 
 [[service]]
 path = "/system/bin/se_omapi"
+ready_service = "android.se.omapi.ISecureElementService/default"
 libraries = ["/system/lib64", "/vendor/lib64"]
 user = "root"
 groups = ["root", "system"]
 
 [[service]]
 path = "/vendor/bin/hw/android.hardware.boot@1.2-service"
+ready_hardware_service = "android.hardware.boot@1.2::IBootControl/default"
 libraries = ["/system/lib64", "/vendor/lib64"]
 user = "root"
 groups = ["root"]
