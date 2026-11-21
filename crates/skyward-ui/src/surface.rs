@@ -626,6 +626,9 @@ pub mod kms {
         back: usize,
         /// A frame was committed whose flip has not come yet.
         flipping: bool,
+        /// Frames committed whose flip has not come yet, up to what the
+        /// buffers hold.
+        pending: usize,
         /// The planes showing the buffer, one per layer mixer, with their
         /// FB_ID properties.
         planes: Vec<(plane::Handle, property::Handle)>,
@@ -904,6 +907,7 @@ pub mod kms {
                 bufs,
                 back: 1,
                 flipping: false,
+                pending: 0,
                 planes,
                 crtc,
                 active,
@@ -1076,13 +1080,23 @@ pub mod kms {
                 }
                 flags |= AtomicCommitFlags::ALLOW_MODESET;
             }
-            self.settle()?;
+            // A frame may be drawn while the one before it is still on its
+            // way to the panel: three buffers are held, so two may be in
+            // flight. Waiting for every one of them pins the loop to the
+            // pace the panel is already keeping, and a panel that raises its
+            // refresh only when frames arrive faster than that never does -
+            // the loop waits for the panel, and the panel waits for frames.
+            const IN_FLIGHT: usize = 2;
+            if self.pending >= IN_FLIGHT {
+                self.settle()?;
+            }
             self.card.atomic_commit(flags, req).context(if self.power == Power::On { "flip" } else { "turn the display on" })?;
             if self.power == Power::Off {
                 self.slow = self.fastest.is_some();
             }
             self.power = Power::On;
             self.flipping = true;
+            self.pending += 1;
             self.back = (self.back + 1) % self.bufs.len();
             Ok(())
         }
@@ -1091,6 +1105,8 @@ pub mod kms {
             if self.flipping {
                 flipped(&self.card).context("flip")?;
                 self.flipping = false;
+                // What was in flight is on the panel now.
+                self.pending = 0;
             }
             Ok(())
         }
