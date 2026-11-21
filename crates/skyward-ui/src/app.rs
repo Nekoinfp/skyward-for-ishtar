@@ -5127,15 +5127,21 @@ impl App {
         if let Some((text, _)) = &self.toast {
             widgets::toast(out, &t, f, text);
         }
-        // The `<` shows where the pages do not: a back gesture that pulls
-        // the page under in with the finger needs no cue.
-        if self.preview.is_none() {
-            match self.drag {
-                Drag::Edge { start, from_left, armed, x, cy } => {
+        // The page pulled in with the finger carries the gesture by itself,
+        // but not whether lifting would go back: the `<` says that on the
+        // edge. Where there is no page to pull in, the cue draws the wave and
+        // the arrow with it.
+        match self.drag {
+            Drag::Edge { start, from_left, armed, x, cy } => {
+                if self.preview.is_some() {
+                    widgets::back_hint(out, &t, from_left, cy, armed);
+                } else {
                     let travel = if from_left { x - start } else { start - x };
                     widgets::back_cue(out, &t, from_left, cy, widgets::back_cue_depth(&t, travel), armed);
                 }
-                _ => {
+            }
+            _ => {
+                if self.preview.is_none() {
                     if let Some((from_left, cy, s)) = self.cue {
                         widgets::back_cue(out, &t, from_left, cy, s.at(now).0.max(0.0), false);
                     }
@@ -9548,6 +9554,33 @@ mod tests {
         assert_eq!(app.deadline(24), app.idle_due(), "nothing left on screen to settle");
     }
 
+    /// A page pulled in with the finger moves, but says nothing about
+    /// whether lifting would go back: the arrow at the edge says it. It is
+    /// drawn white once armed and light blue before.
+    #[test]
+    fn the_edge_swipe_marks_the_edge_even_while_the_page_follows_the_finger() {
+        let t = Theme::light(W, H, PPD);
+        let cy = 1600.0;
+        // Where the arrow's tip falls: the inset less half its width.
+        let tip_x = (t.m.dp(15.0) - t.m.dp(7.5) / 2.0).round() as usize;
+        let row = (cy as usize) * W as usize;
+        let ink_at = |c: &Canvas, armed: bool| {
+            let px = &c.data[(row + tip_x) * 4..(row + tip_x) * 4 + 3];
+            (px[0], px[1], px[2], armed)
+        };
+        for (armed, expected) in [(false, (117u8, 170u8, 246u8)), (true, (255, 255, 255))] {
+            let mut c = Canvas::new(W, H);
+            widgets::back_hint(&mut c, &t, true, cy, armed);
+            let (r, g, b, _) = ink_at(&c, armed);
+            assert_eq!((r, g, b), expected, "armed {armed}: the edge says whether lifting goes back");
+        }
+        // And on the right edge it sits the same distance in.
+        let mut c = Canvas::new(W, H);
+        widgets::back_hint(&mut c, &t, false, cy, true);
+        let right_x = (W as f32 - t.m.dp(15.0) - t.m.dp(7.5) / 2.0).round() as usize;
+        let px = &c.data[(row + right_x) * 4..(row + right_x) * 4 + 3];
+        assert!(px[0] > 200 && px[1] > 200 && px[2] > 200, "the arrow is on the right edge too: {px:?}");
+    }
     #[test]
     fn the_back_cue_taps_once_as_it_arms_and_sinks_when_let_go() {
         let (f, i) = (fonts(), info());

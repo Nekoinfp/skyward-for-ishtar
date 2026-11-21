@@ -129,7 +129,12 @@ pub struct Battery {
 impl Battery {
     /// Whether it charges, or is full and topped up.
     pub fn charging(&self) -> bool {
-        matches!(self.charge, Charge::Charging | Charge::Full)
+        // A charger attached is a charger, whatever the fuel gauge says of
+        // the current: in a recovery the phone is often plugged in while the
+        // gauge still reports `Discharging`, because the charge the framework
+        // normally starts has not begun. The stock bar shows its bolt for a
+        // cable, and so does this one.
+        self.plugged || matches!(self.charge, Charge::Charging | Charge::Full)
     }
 }
 
@@ -482,7 +487,9 @@ fn battery(root: &Path) -> Result<Option<Battery>> {
         "Not charging" => Charge::NotCharging,
         "Full" => Charge::Full,
         "Unknown" => Charge::Unknown,
-        other => bail!("{}: status {other:?}", dir.display()),
+        // A word this build does not know is still a battery: report it as
+        // unknown rather than losing the level with it.
+        _ => Charge::Unknown,
     };
     Ok(Some(Battery {
         level: parse(&read(dir.join("capacity"))?, "capacity")?,
@@ -574,6 +581,45 @@ mod tests {
         assert!(battery(&supplies).unwrap().expect("a battery").quick, "turbo charging is quick");
     }
 
+    /// The bar shows its bolt for a cable. In a recovery the gauge often
+    /// still says `Discharging` while the phone is plugged in, because the
+    /// charge the framework normally starts has not begun: judging by the
+    /// gauge alone left the bolt off a phone on a charger.
+    #[test]
+    fn a_cable_in_the_phone_counts_as_charging_whatever_the_gauge_says() {
+        let class = tempfile::tempdir().unwrap();
+        let supplies = class.path().join("power_supply");
+        let supply = |name: &str, files: &[(&str, &str)]| {
+            let dir = supplies.join(name);
+            fs::create_dir_all(&dir).unwrap();
+            for (file, value) in files {
+                fs::write(dir.join(file), format!("{value}\n")).unwrap();
+            }
+        };
+        supply("battery", &[("type", "Battery"), ("status", "Discharging"), ("capacity", "25")]);
+        supply("usb", &[("type", "USB"), ("online", "0")]);
+        let alone = battery(&supplies).unwrap().expect("a battery");
+        assert_eq!((alone.level, alone.charging()), (25, false), "on its own battery it is not charging");
+        supply("usb", &[("type", "USB"), ("online", "1")]);
+        let plugged = battery(&supplies).unwrap().expect("a battery");
+        assert_eq!(plugged.charge, Charge::Discharging, "the gauge still says it is discharging");
+        assert!(plugged.charging(), "but a cable is a cable: the bolt belongs on the bar");
+    }
+
+    /// A status word this build does not know is a battery all the same: the
+    /// level is worth having even when the state is not understood.
+    #[test]
+    fn a_gauge_speaking_an_unknown_word_still_gives_its_level() {
+        let class = tempfile::tempdir().unwrap();
+        let supplies = class.path().join("power_supply");
+        let dir = supplies.join("battery");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("type"), "Battery\n").unwrap();
+        fs::write(dir.join("status"), "Charging fast\n").unwrap();
+        fs::write(dir.join("capacity"), "72\n").unwrap();
+        let b = battery(&supplies).unwrap().expect("a battery");
+        assert_eq!((b.level, b.charge), (72, Charge::Unknown), "the level is kept, the word is not guessed at");
+    }
     #[test]
     fn the_phone_is_plugged_in_while_a_power_supply_besides_the_battery_is_online() {
         // The 13 Ultra's power supplies in the recovery.
