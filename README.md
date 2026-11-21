@@ -2,17 +2,16 @@
 
 Skyward 是一个用 Rust 写的第三方 recovery。
 
-本项目是 **小米 13 Ultra（ishtar）、澎湃 OS 4.0.29（`OS4.0.29.0.XEOCNXM`）** 的适配版本。
+本项目是 **小米 13 Ultra（ishtar）** 的适配版本，在一台装了**第三方移植的
+澎湃 OS 4.0.29（`OS4.0.29.0.XEOCNXM`）**的真机上验证过。
 
 - 上游：[kirklin/skyward](https://github.com/kirklin/skyward) 0.3.1
 - 本版本：**0.3.1-beta1**
 - 目标机型：Xiaomi 13 Ultra（`2304FPN6DC`）
-- 测试系统：OS4.0.29.0.XEOCNXM（Android 17 / SDK 37）
 - 底包：OS3.0.308.0.WMACNXM 原厂 recovery
   （`ed63e2d3cbb1b06a15579f5384c87e7d80505e44140b3a767f5034d532a3568a`）
 
-> ⚠️ **测试版**。已经在一台真机上点亮、触摸、120 Hz 与全套密钥服务，
-> 但**用户数据（CE）还没有解开过**。刷入前请自己备份原厂 recovery。
+> ⚠️ **测试版，只在一台真机上验证过。** 刷入前请自己备份原厂 recovery。
 
 ---
 
@@ -20,43 +19,51 @@ Skyward 是一个用 Rust 写的第三方 recovery。
 
 Skyward 的构造方式是在手机自己的原厂 recovery 上重建：内核、`init`、`adbd`、
 SELinux 策略、库都是原厂的，只把 `system/bin/recovery` 换成 Skyward 本体。
-所以换机型只需要换描述，但这台手机的描述与 15 Ultra 有四处实质差异：
+所以换机型只需要换描述，但这台手机的描述与 15 Ultra 有实质差异：
 
 | | 13 Ultra（ishtar） | 15 Ultra（xuanyuan） |
 | --- | --- | --- |
 | 触摸 | ST FTS over SPI（`fts_touch_spi`），走 `touch_report` | Synaptics TouchComm |
 | 屏幕 | 1440×3200，密度 560，120 Hz | 1440×3200，密度 600 |
-| 密钥服务 | **HIDL**：gatekeeper/boot/安全元件都走 `hwbinder` | 全 AIDL |
+| 密钥服务 | **HIDL**：gatekeeper / boot / 安全元件都走 `hwbinder` | 全 AIDL |
 | weaver | **没有独立进程**，由 keymint 的 AIDL 实现回答 | odm 上的 thales |
 | snapuserd | 原厂 recovery **自带** | 原厂没有，打包时补进去 |
 
-HIDL 这一条是适配的主要难点：recovery 里没有 `hwservicemanager`，
-而 HIDL 服务没有它就没有注册中心。Android 从 `system_ext` 跑它，
-本适配把它作为手机自己的一个程序启动。
+HIDL 这一条是适配的主要难点：recovery 里没有 `hwservicemanager`，而 HIDL 服务
+没有它就没有注册中心，全都会报 `Binder driver could not be opened`。Android 从
+`system_ext` 跑它，本适配把它作为手机自己的一个程序启动。
 
 ## 已验证的功能
 
-在真机上跑过：
+在真机上逐项跑过：
 
 - **点亮与界面**：主页、设置页、中文排版全部正常
 - **触摸**：可用
-- **120 Hz**：面板的 `1440x3200x120cmd@120x60auto` 模式，`fastest_refresh = true`
+- **120 Hz**：面板的 `1440x3200x120cmd@120x60auto` 模式（`fastest_refresh = true`）
 - **九分区挂载**：system / system_ext / vendor / odm / product / mi_ext 等
 - **密钥链全部就绪**：hwservicemanager、qseecomd、ssgtzd、keymint、
   gatekeeper、安全元件六个进程在跑
   - `skyward gatekeeper` 实测应答：*"the secure world does not recognise
     that credential"*——安全世界在工作
   - `skyward keymint` 应答 HAL 4 version 4
-- **`/data` 设备加密（DE）解开**：`/data` 挂载为 `dm-9`，62 个顶层条目，
-  `/data/data` 592 个应用目录可读
-- **浏览器**：入口在「双系统」下方，能读网页、显示图片
+- **`/data` 完全解开**：设备加密（DE）不需要凭据，`/data` 挂载为 `dm-9`，
+  62 个顶层条目；输入锁屏 PIN 后**用户加密（CE）也打开**，
+  `/sdcard` 列出 31 项真实文件、`/data/data` 592 个应用目录可读
 
 ## 还没验证的
 
-- **用户加密（CE）**：`/sdcard` 与各用户自己的文件仍锁着，需要锁屏 PIN。
-  输入后能否解开尚未确认——密钥链已就绪，但没试过真的凭据。
-- **WLAN**：`qca_cld3_kiwi_v2` 走 `cnss2`，未验证
-- **压缩快照读取**：原厂 recovery 自带 snapuserd，未验证
+- **WLAN**：`qca_cld3_kiwi_v2` 走 `cnss2`，没有在真机上连过网
+- **压缩快照读取**：原厂 recovery 自带 snapuserd，没有在有系统更新的机器上试过
+- **安装、备份、恢复**：界面和逻辑都在，但没有逐项做完一遍真机流程
+
+## 关于「检查更新」
+
+系统更新页的「检查更新」会把本机的机型与版本（`ishtar` + `OS4.0.29.0.XEOCNXM`）
+发给小米的更新服务器。因为 **OS4.0.29 是第三方移植的版本号，不在小米的发布序列里**，
+服务器会回答「没有这台手机的更新」。
+
+这不是故障——13 Ultra 的官方最新版本是 `OS3.0.308.0.WMACNXM`，拿移植包的版本号去问，
+本来就问不到东西。若你刷的是官方系统，它会正常工作。
 
 ## 已知限制
 
@@ -68,7 +75,7 @@ HIDL 这一条是适配的主要难点：recovery 里没有 `hwservicemanager`�
 
 ## 安装
 
-手机进入 fastboot 刷入镜像即可。两个槽都刷，避免某次重启回落到旧的那一份：
+手机进入 fastboot，两个槽都刷，避免某次重启回落到旧的那一份：
 
 ```bash
 fastboot flash recovery_a skyward-v0.3.1-beta1-ishtar-OS3.0.308.0.WMACNXM.img
@@ -78,10 +85,24 @@ fastboot reboot recovery
 
 进 recovery 后到「解密」页输入锁屏 PIN，`/data` 与内部存储就都能读。
 
+### 刷了别的 recovery 起不来时
+
+这台手机的 bootloader 会拒绝**没有 AVB 属性描述符（`property descriptor`）**的
+recovery 镜像——刷进去之后不进 recovery，直接掉回 fastboot。这时槽位会被标记成
+不可启动，**再刷能用的镜像也会先掉 fastboot**，需要先清掉那个标记：
+
+```bash
+fastboot getvar slot-unbootable:a     # 看是不是 yes
+fastboot set_active a                 # 清掉
+fastboot flash recovery_a <可用的镜像>
+```
+
+本项目打出来的镜像带这个描述符（审计 32 项全过），别人的包不一定带。
+
 ### 底包必须对上
 
-底包是 **OS3.0.308.0.WMACNXM**（这台手机的 vendor 分区就是它）。
-手机如果跑的是别的版本，应当用它自己那一份 recovery 重打包：
+底包是 **OS3.0.308.0.WMACNXM**。手机如果跑的是别的系统，应当用它自己那一份
+recovery 重打包：
 
 ```bash
 adb shell su -c 'dd if=/dev/block/bootdevice/by-name/recovery of=/sdcard/recovery.img'
@@ -111,6 +132,13 @@ target/release/skyward-pack recovery \
 ```
 
 不需要 `--snapuserd`：这台手机的原厂 recovery 里本来就有，打包器会拒绝重复添加。
+
+工具里还有两个诊断用的小程序：
+
+```bash
+tools/audit-image.py <镜像>          # 审计镜像结构（boot 头、ramdisk、AVB）
+tools/avb-read.py <标签> <镜像>      # 读 AVB footer 与 vbmeta 头
+```
 
 ---
 
