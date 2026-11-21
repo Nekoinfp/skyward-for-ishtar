@@ -5127,24 +5127,19 @@ impl App {
         if let Some((text, _)) = &self.toast {
             widgets::toast(out, &t, f, text);
         }
-        // The page pulled in with the finger carries the gesture by itself,
-        // but not whether lifting would go back: the `<` says that on the
-        // edge. Where there is no page to pull in, the cue draws the wave and
-        // the arrow with it.
+        // The cue is drawn whichever way the gesture is going, as upstream
+        // draws it: a page pulled in with the finger says something is
+        // happening, not whether lifting would go back, and the `<` on the
+        // wave says that. A condition here once hid it whenever a page was
+        // being pulled in, which left the gesture with no tell at all.
         match self.drag {
             Drag::Edge { start, from_left, armed, x, cy } => {
-                if self.preview.is_some() {
-                    widgets::back_hint(out, &t, from_left, cy, armed);
-                } else {
-                    let travel = if from_left { x - start } else { start - x };
-                    widgets::back_cue(out, &t, from_left, cy, widgets::back_cue_depth(&t, travel), armed);
-                }
+                let travel = if from_left { x - start } else { start - x };
+                widgets::back_cue(out, &t, from_left, cy, widgets::back_cue_depth(&t, travel), armed);
             }
             _ => {
-                if self.preview.is_none() {
-                    if let Some((from_left, cy, s)) = self.cue {
-                        widgets::back_cue(out, &t, from_left, cy, s.at(now).0.max(0.0), false);
-                    }
+                if let Some((from_left, cy, s)) = self.cue {
+                    widgets::back_cue(out, &t, from_left, cy, s.at(now).0.max(0.0), false);
                 }
             }
         }
@@ -9184,7 +9179,11 @@ mod tests {
     /// it the page `under`, `behind` pixels left of rest and keeping `keep`
     /// 256ths of its light.
     fn check_slide(mid: &Canvas, ahead: &Canvas, under: &Canvas, y: u32, (front, behind, keep): (u32, u32, u32)) {
-        for x in 0..W {
+        // The back cue lies over the page at the edge the swipe came from, as
+        // it does upstream, so the columns under it are its business and not
+        // the slide's.
+        const CUE_W: u32 = 200;
+        for x in CUE_W..W {
             let at = |c: &Canvas, x: u32| c.data[((y * W + x) * 4) as usize] as u32;
             let want = if x >= front { at(ahead, x - front) } else { (at(under, x + behind) * keep) >> 8 };
             let got = at(mid, x);
@@ -9556,33 +9555,6 @@ mod tests {
         assert_eq!(app.deadline(24), app.idle_due(), "nothing left on screen to settle");
     }
 
-    /// A page pulled in with the finger moves, but says nothing about
-    /// whether lifting would go back: the arrow at the edge says it. It is
-    /// drawn white once armed and light blue before.
-    #[test]
-    fn the_edge_swipe_marks_the_edge_even_while_the_page_follows_the_finger() {
-        let t = Theme::light(W, H, PPD);
-        let cy = 1600.0;
-        // Where the arrow's tip falls: the inset less half its width.
-        let tip_x = (t.m.dp(15.0) - t.m.dp(7.5) / 2.0).round() as usize;
-        let row = (cy as usize) * W as usize;
-        let ink_at = |c: &Canvas, armed: bool| {
-            let px = &c.data[(row + tip_x) * 4..(row + tip_x) * 4 + 3];
-            (px[0], px[1], px[2], armed)
-        };
-        for (armed, expected) in [(false, (117u8, 170u8, 246u8)), (true, (255, 255, 255))] {
-            let mut c = Canvas::new(W, H);
-            widgets::back_hint(&mut c, &t, true, cy, armed);
-            let (r, g, b, _) = ink_at(&c, armed);
-            assert_eq!((r, g, b), expected, "armed {armed}: the edge says whether lifting goes back");
-        }
-        // And on the right edge it sits the same distance in.
-        let mut c = Canvas::new(W, H);
-        widgets::back_hint(&mut c, &t, false, cy, true);
-        let right_x = (W as f32 - t.m.dp(15.0) - t.m.dp(7.5) / 2.0).round() as usize;
-        let px = &c.data[(row + right_x) * 4..(row + right_x) * 4 + 3];
-        assert!(px[0] > 200 && px[1] > 200 && px[2] > 200, "the arrow is on the right edge too: {px:?}");
-    }
     #[test]
     fn the_back_cue_taps_once_as_it_arms_and_sinks_when_let_go() {
         let (f, i) = (fonts(), info());

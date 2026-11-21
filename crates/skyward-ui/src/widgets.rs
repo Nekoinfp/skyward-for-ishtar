@@ -740,24 +740,6 @@ pub fn back_cue(c: &mut Canvas, t: &Theme, from_left: bool, cy: f32, depth: f32,
     }
 }
 
-/// The `<` held at the edge of a page a finger is pulling in.
-///
-/// [`back_cue`] carries its own arrow on the wave it draws. Where the page
-/// itself moves under the finger there is no wave, and without this there is
-/// nothing at the edge saying whether lifting would go back — which is what a
-/// reader swiping without looking at the page is asking.
-pub fn back_hint(c: &mut Canvas, t: &Theme, from_left: bool, cy: f32, armed: bool) {
-    const RIM: Rgba = Rgba::rgb(117, 170, 246);
-    let m = &t.m;
-    let (w, h, sw) = (m.dp(7.5), m.dp(15.0), m.dp(2.4));
-    let inset = m.dp(15.0);
-    let cx = if from_left { inset } else { m.w as f32 - inset };
-    // Light blue until lifting would go back, then white, as the cue's own.
-    let color = if armed { Rgba::rgb(255, 255, 255) } else { RIM };
-    let (tip, end) = (cx - w / 2.0, cx + w / 2.0);
-    c.line(tip, cy, end, cy - h / 2.0 + sw / 2.0, sw, color);
-    c.line(tip, cy, end, cy + h / 2.0 - sw / 2.0, sw, color);
-}
 /// Room left around title ink for it to blur into.
 fn blur_room(t: &Theme) -> f32 {
     t.m.dp(14.0)
