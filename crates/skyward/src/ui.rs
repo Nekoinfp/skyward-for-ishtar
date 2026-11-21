@@ -1151,14 +1151,24 @@ fn wlan_worker(w: &Option<wlan::Worker>) -> Result<&wlan::Worker> {
 }
 
 /// The installed system, as the update server is told of it.
+///
+/// A ported system may carry the device name under fewer names than the
+/// maker uses: this phone has no ro.product.mod_device at all, and says what
+/// it is under ro.product.device and ro.product.name instead. The version
+/// falls back the same way, to the incremental build it always has.
 fn installed(cfg: &DeviceConfig, info: &skyward_info::DeviceInfo) -> Result<Installed> {
     let slot = info.slot.context("only an A/B phone is updated")?;
     let props = skyward_info::installed_props(slot)?;
-    let prop = |name: &str| props.get(name).cloned().with_context(|| format!("the installed system says no {name}"));
+    let first = |names: &[&str], what: &str| -> Result<String> {
+        names
+            .iter()
+            .find_map(|name| props.get(*name).cloned())
+            .with_context(|| format!("the installed system says no {what}"))
+    };
     Ok(Installed {
-        device: prop("ro.product.mod_device")?,
-        version: prop(&cfg.device.os_version_prop)?,
-        android: prop("ro.build.version.release")?,
+        device: first(&["ro.product.mod_device", "ro.product.device", "ro.product.name"], "ro.product.mod_device")?,
+        version: first(&[cfg.device.os_version_prop.as_str(), "ro.build.version.incremental"], &cfg.device.os_version_prop)?,
+        android: first(&["ro.build.version.release"], "ro.build.version.release")?,
         unlocked: skyward_block::boot_param("androidboot.flash.locked")?.as_deref() == Some("0"),
     })
 }
