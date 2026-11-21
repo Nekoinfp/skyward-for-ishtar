@@ -7010,6 +7010,20 @@ impl App {
             b.history.push(url.clone());
             b.at = b.history.len() - 1;
         }
+        // A video is not a page to read: it is named, and what the recovery
+        // can do about it is what the card says.
+        if browser::is_video(&url) {
+            let name = browser::file_name_of(&url);
+            b.loading = false;
+            b.said = None;
+            b.links.clear();
+            b.page = Some(Ok(browser::Document {
+                title: String::new(),
+                blocks: vec![browser::Block::Video { src: url, name }],
+            }));
+            self.refresh();
+            return Vec::new();
+        }
         self.refresh();
         vec![Effect::Browse(url)]
     }
@@ -7046,6 +7060,14 @@ impl App {
                 // order the page numbers them as it draws.
                 b.links.clear();
                 for block in &document.blocks {
+                    // A video is offered as a link too, and is numbered
+                    // where it stands among them.
+                    if let browser::Block::Video { src, .. } = block {
+                        if b.links.len() < MOST_LINKS {
+                            b.links.push(src.clone());
+                        }
+                        continue;
+                    }
                     let spans = match block {
                         browser::Block::Para(spans) | browser::Block::Quote(spans) => spans.as_slice(),
                         browser::Block::Item { spans, .. } => spans.as_slice(),

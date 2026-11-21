@@ -4869,6 +4869,12 @@ const BROWSER_NOWEB: Text = [
     "Not on a network yet. Join one on the WLAN page, then come back.",
 ];
 const BROWSER_AGAIN: Text = ["重试", "重試", "Try again"];
+const BROWSER_NOVIDEO: Text = [
+    "这个浏览器还不能播放视频。页面把视频地址直接写出来的，可以在这里看到它叫什么。",
+    "這個瀏覽器還不能播放影片。頁面把影片網址直接寫出來的，可以在這裡看到它叫什麼。",
+    "This browser cannot play video yet. Where a page names a video outright, it is shown here.",
+];
+
 const BROWSER_MORE: Text = [
     "页面很长，这里只画到屏幕放得下的地方。",
     "頁面很長，這裡只畫到螢幕放得下的地方。",
@@ -5042,6 +5048,40 @@ fn document(
             browser::Block::Rule => {
                 c.fill_rect(x, y + m.dp(8.0), w, 1.0, t.pal.track);
                 y + m.dp(20.0)
+            }
+            browser::Block::Video { src, name } => {
+                // A video the page names outright, offered as something to
+                // fetch: what can be done with it is said on the card.
+                let box_h = m.dp(96.0);
+                c.fill_round_rect(x, y, w, box_h, m.dp(12.0), t.pal.card);
+                let disc = m.dp(48.0);
+                let cx = x + m.dp(22.0) + disc / 2.0;
+                let cy = y + box_h / 2.0;
+                c.fill_circle(cx, cy, disc / 2.0, t.pal.accent);
+                // A triangle, pointing right.
+                let r = disc * 0.16;
+                c.fill_convex(&[
+                    (cx - r * 0.7, cy - r),
+                    (cx - r * 0.7, cy + r),
+                    (cx + r * 1.1, cy),
+                ], t.pal.card);
+                let text_x = x + m.dp(22.0) + disc + m.dp(16.0);
+                let px = m.dp(15.0);
+                let room = (x + w) - text_x - m.dp(14.0);
+                let shown = wrap_plain(c, &f.body, name, px, room);
+                if let Some(first) = shown.first() {
+                    c.text_top(&f.body, first, text_x, y + box_h / 2.0 - line_height(&f.body, px), px, t.pal.text, None);
+                }
+                let small = m.dp(12.5);
+                c.text_top(&f.body, l.pick(["视频", "影片", "video"]), text_x, y + box_h / 2.0 + m.dp(4.0), small, t.pal.subtitle, None);
+                // Its place in the page's links, numbered as the page
+                // collected them: a video is a link like any other.
+                let at = next_link;
+                next_link += 1;
+                out.push(Hit { rect: Rect::new(x, y, w, box_h), action: Action::BrowseLink(at) });
+                let _ = src;
+                // Said plainly rather than left to be discovered.
+                widgets::footnote(c, t, f, y + box_h + m.dp(6.0), l.pick(BROWSER_NOVIDEO)) + m.dp(13.0)
             }
             browser::Block::Image { alt, .. } => {
                 let box_h = m.dp(70.0);

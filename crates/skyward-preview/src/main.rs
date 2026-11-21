@@ -215,6 +215,7 @@ fn main() -> Result<()> {
             <ol><li>First numbered item.</li><li>Second one, with a longer line that has to
             wrap somewhere before the end of the room it is given.</li></ol>
             <img src="/a.png" alt="a picture, named but not drawn">
+            <video src="/clips/holiday-2026.mp4" title="holiday-2026.mp4"></video>
             <hr>
             <p>Plain text after a rule, to see where the rule falls.</p>
             </body></html>"#;

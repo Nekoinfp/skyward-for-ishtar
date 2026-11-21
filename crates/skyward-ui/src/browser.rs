@@ -24,6 +24,12 @@ pub enum Block {
     Rule,
     /// An image, named but not shown.
     Image { alt: String, src: String },
+    /// A video the page offers to play: where it is, and what it is called.
+    ///
+    /// A page that names its video outright can be watched; one that builds
+    /// the address with a script leaves this empty, which is the whole of the
+    /// difference between the two.
+    Video { src: String, name: String },
 }
 
 /// A run of words, and where following it leads.
@@ -79,6 +85,13 @@ impl Document {
                     out.push('[');
                     out.push_str(alt);
                     out.push_str("]\n");
+                }
+                Block::Video { src, name } => {
+                    out.push('[');
+                    out.push_str(name);
+                    out.push_str("] ");
+                    out.push_str(src);
+                    out.push('\n');
                 }
             }
         }
@@ -328,6 +341,19 @@ fn element(b: &mut Building, name: &str, closing: bool, tag: &str, base: &str) {
         "i" | "em" => {
             b.flush_text();
             b.italic = if closing { b.italic.saturating_sub(1) } else { b.italic + 1 };
+        }
+        // A video the page names outright. `<source>` children are read the
+        // same way, so a page that lists several formats gives the first.
+        "video" | "audio" | "source" => {
+            b.close_block();
+            if let Some(src) = attribute(tag, "src").filter(|s| !s.trim().is_empty()) {
+                let name = attribute(tag, "title")
+                    .or_else(|| attribute(tag, "alt"))
+                    .map(|t| collapse(&decode(&t)))
+                    .filter(|t| !t.is_empty())
+                    .unwrap_or_else(|| file_name_of(&src));
+                b.blocks.push(Block::Video { src: resolve(base, &src), name });
+            }
         }
         "img" => {
             b.close_block();
@@ -628,6 +654,48 @@ pub fn resolve(base: &str, href: &str) -> String {
     format!("{scheme}://{authority}{folder}{href}")
 }
 
+/// The last part of an address, which is what a file is called: the name a
+/// video is offered under when the page gives it none.
+pub fn file_name_of(url: &str) -> String {
+    let without_query = url.split(['?', '#']).next().unwrap_or(url);
+    let last = without_query.rsplit('/').find(|part| !part.is_empty()).unwrap_or(without_query);
+    let decoded = decode(&percent(last));
+    if decoded.is_empty() {
+        url.to_string()
+    } else {
+        decoded
+    }
+}
+
+/// The bytes an address writes as `%20` and the like, as the letters they
+/// stand for: what a file is really called.
+fn percent(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let pair = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            if let Some(byte) = pair.and_then(|hex| u8::from_str_radix(hex, 16).ok()) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Whether an address names something a browser would play rather than read.
+pub fn is_video(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let without_query = lower.split(['?', '#']).next().unwrap_or(&lower);
+    [".mp4", ".m4v", ".webm", ".mkv", ".mov", ".avi", ".ts", ".m3u8", ".mpd"]
+        .iter()
+        .any(|ending| without_query.ends_with(ending))
+}
 /// An address as a reader typed it, made into one a server is asked for.
 ///
 /// `example.com` is a place to go, so it is asked for over https; anything
@@ -904,6 +972,59 @@ fn words_of(text: &str) -> Vec<String> {
             let text = spans_text(spans);
             assert_eq!(text, text.trim(), "{html}: {text:?} keeps a space at an edge");
         }
+    }
+
+    #[test]
+    fn a_video_the_page_names_outright_is_read_as_one() {
+        let doc = read(r#"<p>before</p><video src="/clips/a.mp4" title="A clip"></video>"#, "https://example.com/page");
+        let video = doc.blocks.iter().find_map(|b| match b {
+            Block::Video { src, name } => Some((src.as_str(), name.as_str())),
+            _ => None,
+        });
+        assert_eq!(video, Some(("https://example.com/clips/a.mp4", "A clip")), "{:?}", doc.blocks);
+    }
+
+    #[test]
+    fn a_video_that_lists_its_formats_is_read_by_the_first_it_names() {
+        let doc = read(
+            r#"<video><source src="a.webm" type="video/webm"><source src="b.mp4" type="video/mp4"></video>"#,
+            "https://example.com/",
+        );
+        let video = doc.blocks.iter().find_map(|b| match b {
+            Block::Video { src, .. } => Some(src.as_str()),
+            _ => None,
+        });
+        assert_eq!(video, Some("https://example.com/a.webm"), "{:?}", doc.blocks);
+    }
+
+    #[test]
+    fn a_video_is_named_by_its_file_when_the_page_gives_it_no_name() {
+        let doc = read(r#"<video src="https://cdn.example.com/x/holiday-2026.mp4"></video>"#, "https://example.com/");
+        let name = doc.blocks.iter().find_map(|b| match b {
+            Block::Video { name, .. } => Some(name.clone()),
+            _ => None,
+        });
+        assert_eq!(name.as_deref(), Some("holiday-2026.mp4"), "{:?}", doc.blocks);
+    }
+
+    #[test]
+    fn what_a_browser_would_play_is_told_from_what_it_reads() {
+        assert!(is_video("https://example.com/a.mp4"));
+        assert!(is_video("https://example.com/a.mp4?token=1"));
+        assert!(is_video("https://example.com/A.MP4"));
+        assert!(is_video("https://example.com/stream.m3u8"));
+        assert!(is_video("https://example.com/a.webm"));
+        assert!(!is_video("https://example.com/page.html"));
+        assert!(!is_video("https://example.com/"));
+        assert!(!is_video("https://example.com/x.mp4.html"));
+    }
+
+    #[test]
+    fn a_file_is_named_by_the_last_part_of_its_address() {
+        assert_eq!(file_name_of("https://example.com/a/b/movie.mp4"), "movie.mp4");
+        assert_eq!(file_name_of("https://example.com/a%20b.mp4"), "a b.mp4");
+        assert_eq!(file_name_of("https://example.com/"), "example.com", "an address with no file is named by its host");
+        assert_eq!(file_name_of("https://example.com"), "example.com");
     }
 #[cfg(test)]
 mod layout_tests {
