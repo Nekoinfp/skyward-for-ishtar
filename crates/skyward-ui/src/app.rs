@@ -3028,12 +3028,20 @@ fn row_wide(t: &Theme, r: Rect) -> bool {
     (r.x - m.margin).abs() < 0.5 && (r.w - (m.w as f32 - m.margin * 2.0)).abs() < 0.5
 }
 
-/// The whole pixels of the page's `canvas` a held row's `rect` covers:
-/// left, top, width and height.
+/// The whole pixels of the page canvas a held rect covers: left, top,
+/// width and height, cut to the rows the canvas actually holds.
+///
+/// A page taller than its canvas is held in a range of rows rather than all
+/// of its height, and a held rect can lie past them: a press that outlives
+/// the page it started on, after the page under it changed. Taking the part
+/// that is there leaves a smaller piece to draw rather than a panic.
 fn row_part(r: Rect, canvas: &Canvas) -> (u32, u32, u32, u32) {
-    let (x0, y0) = (r.x.floor().max(0.0) as u32, r.y.floor().max(0.0) as u32);
-    let (x1, y1) = (((r.x + r.w).ceil() as u32).min(canvas.w), ((r.y + r.h).ceil() as u32).min(canvas.h));
-    (x0, y0, x1 - x0, y1 - y0)
+    let held = canvas.held();
+    let x0 = r.x.floor().max(0.0) as u32;
+    let y0 = (r.y.floor().max(0.0) as u32).max(held.start);
+    let x1 = ((r.x + r.w).ceil() as u32).min(canvas.w);
+    let y1 = ((r.y + r.h).ceil() as u32).min(held.end);
+    (x0.min(x1), y0.min(y1), x1.saturating_sub(x0), y1.saturating_sub(y0))
 }
 
 /// The keyboard at the foot of a typing page's `frame`, and where it rests.
