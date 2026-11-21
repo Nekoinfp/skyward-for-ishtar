@@ -1788,6 +1788,10 @@ impl Frame {
     }
 }
 
+/// How many links of one page a reader may be offered: past this the rest
+/// are drawn but not touchable.
+const MOST_LINKS: usize = 1_000;
+
 /// What the browser page holds: the address being read, the page it gave,
 /// the pages gone before, and where the reader is among them.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -7048,6 +7052,12 @@ impl App {
                         _ => continue,
                     };
                     for span in spans {
+                        // A page of thousands of links is not one a reader
+                        // follows by touching, and holding them all costs the
+                        // recovery's memory.
+                        if b.links.len() >= MOST_LINKS {
+                            break;
+                        }
                         if let Some(url) = &span.link {
                             b.links.push(url.clone());
                         }

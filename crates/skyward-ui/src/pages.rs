@@ -4869,6 +4869,11 @@ const BROWSER_NOWEB: Text = [
     "Not on a network yet. Join one on the WLAN page, then come back.",
 ];
 const BROWSER_AGAIN: Text = ["重试", "重試", "Try again"];
+const BROWSER_MORE: Text = [
+    "页面很长，这里只画到屏幕放得下的地方。",
+    "頁面很長，這裡只畫到螢幕放得下的地方。",
+    "This page is long: it is drawn only as far as fits the screen.",
+];
 
 /// The web, one page at a time: an address to type or a link to follow, the
 /// page as it was written, and the way back to the ones before it.
@@ -4926,7 +4931,17 @@ pub fn browser(cx: &Ctx) -> Frame {
             out.extend(hits(&list.rows, &[Action::BrowseReload]));
             y = list.bottom;
         }
-        Some(Ok(doc)) => y = document(&mut c, t, f, l, x, y, w, doc, &mut out),
+        Some(Ok(doc)) => {
+            let limit = c.h as f32;
+            let (after, more) = document(&mut c, t, f, l, x, y, w, doc, limit, &mut out);
+            y = after;
+            if more {
+                // Said rather than left off: a page cut short with nothing
+                // said reads as a page that ended.
+                let said = l.pick(BROWSER_MORE);
+                y = widgets::footnote(&mut c, t, f, y + m.dp(8.0), said);
+            }
+        }
     }
 
     let dock = s.browse.typing.then(|| keyboard_dock(cx, s));
@@ -4935,6 +4950,11 @@ pub fn browser(cx: &Ctx) -> Frame {
 
 /// A page read out, drawn block by block, its links made touchable; the
 /// height it came to.
+/// A page drawn as far as `limit`, which is what the canvas can hold: a page
+/// longer than that stops there rather than laying out blocks that would be
+/// cut off anyway.
+///
+/// Returns the height drawn, and whether more was left unread.
 #[allow(clippy::too_many_arguments)]
 fn document(
     c: &mut Canvas,
@@ -4945,8 +4965,9 @@ fn document(
     y: f32,
     w: f32,
     doc: &browser::Document,
+    limit: f32,
     out: &mut Vec<Hit>,
-) -> f32 {
+) -> (f32, bool) {
     let m = &t.m;
     let mut y = y;
     // The links are numbered as they are met, which is the order the page
@@ -4954,13 +4975,25 @@ fn document(
     let mut next_link = 0u32;
     if !doc.title.is_empty() {
         let px = m.dp(24.0);
-        for line in wrap_plain(c, &f.heading, &doc.title, px, w) {
+        // A title is a name, not a paragraph: a page that calls itself two
+        // hundred words long is trimmed where a reader stops reading it.
+        let title: String = if doc.title.chars().count() > 160 {
+            let mut cut: String = doc.title.chars().take(160).collect();
+            cut.push('…');
+            cut
+        } else {
+            doc.title.clone()
+        };
+        for line in wrap_plain(c, &f.heading, &title, px, w) {
             c.text_top(&f.heading, &line, x, y, px, t.pal.text, None);
             y += line_height(&f.heading, px);
         }
         y += m.dp(16.0);
     }
     for block in &doc.blocks {
+        if y >= limit {
+            return (y, true);
+        }
         y = match block {
             browser::Block::Heading { level, text } => {
                 y += m.dp(10.0);
@@ -5022,7 +5055,7 @@ fn document(
             }
         };
     }
-    y
+    (y, false)
 }
 
 /// Lay `spans` out and draw them, each run of a link made touchable; the

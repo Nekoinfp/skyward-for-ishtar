@@ -9,8 +9,9 @@ use ureq::ResponseExt;
 use std::io::Read;
 
 /// How much of a page is taken. Past this the rest is left: a recovery has
-/// the phone's memory to itself and nothing to page out to.
-pub const MOST: u64 = 2 << 20;
+/// the phone's memory to itself and nothing to page out to, and a page of
+/// markup grows to several times its size as text once it is read.
+pub const MOST: u64 = 512 << 10;
 
 /// What a page is, as far as showing it goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
