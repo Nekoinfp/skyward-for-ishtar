@@ -324,11 +324,10 @@ pub fn home(cx: &Ctx) -> Frame {
         opens.push(Action::Open(Screen::Systems));
     }
     // The web, under the two systems: another place this phone can be, and
-    // the one that needs nothing installed to reach.
-    if cx.state.wlan.is_some() {
-        rows.push(Row::new(l.pick(BROWSER_TITLE)).icon(TEAL, Icon::Globe));
-        opens.push(Action::Open(Screen::Browser));
-    }
+    // the one that needs nothing installed to reach. It is here whether the
+    // network is up or not - the page says how to join one.
+    rows.push(Row::new(l.pick(BROWSER_TITLE)).icon(TEAL, Icon::Globe));
+    opens.push(Action::Open(Screen::Browser));
     if !rows.is_empty() {
         let first = widgets::list(&mut c, t, f, y, &rows);
         out.extend(hits(&first.rows, &opens));
