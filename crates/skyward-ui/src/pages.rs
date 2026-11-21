@@ -636,9 +636,9 @@ pub fn mount(cx: &Ctx) -> Frame {
 /// Who made the recovery, as the About page names them under its version.
 const AUTHOR: &str = "© 2026 Kirk Lin & ppy";
 
-/// What this build is, as the About page says under its version: the
-/// recovery adapted for this phone.
-const BY: &str = "Skyward by xuanyuan";
+/// What this build is for, as the About page says under its version: the
+/// recovery adapted to this phone.
+const BY: &str = "Skyward for xuanyuan";
 
 /// About this device, modelled on the stock「我的设备」: the wordmark, the
 /// version and its author over a moving colour field, and the summary,
