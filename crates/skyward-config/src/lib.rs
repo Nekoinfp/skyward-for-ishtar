@@ -921,7 +921,6 @@ mod tests {
         assert!(DeviceConfig::parse("[device]\ncodename = \"x\"\n").unwrap().owners.is_empty(), "a phone may need none");
     }
 
-    #[test]
     /// The 13 Ultra's, which came from upstream unchanged: it is read to
     /// prove that everything it says is something this build knows.
     #[test]
@@ -934,6 +933,7 @@ mod tests {
         assert!(!cfg.services.is_empty(), "and the programs it starts");
         assert_eq!(cfg.stock.as_ref().map(|s| s.version.as_str()), Some("OS3.0.308.0.WMACNXM"));
     }
+    #[test]
     fn parses_haotian() {
         let cfg = DeviceConfig::parse(include_str!("../../../devices/haotian.toml")).unwrap();
         assert_eq!(cfg.device.codename, "haotian");
