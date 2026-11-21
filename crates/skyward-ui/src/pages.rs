@@ -5,13 +5,12 @@ use crate::app::{
     Wipe, ADDABLE, BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES,
     USB_DRIVE_UNREADABLE, USB_DRIVE_WANTED, WIPES, installs, starting,
 };
-use crate::browser;
 use crate::canvas::Canvas;
 use crate::color::Rgba;
 use crate::editor;
 use crate::files;
 use crate::fmt::{self, Verb};
-use crate::font::{Face, Fonts};
+use crate::font::Fonts;
 use crate::geom::Rect;
 use crate::lang::{Lang, Text};
 use crate::search;
@@ -37,7 +36,6 @@ const PURPLE: Rgba = Rgba::rgb(0x77, 0x67, 0xf9);
 const SLATE: Rgba = Rgba::rgb(0x8c, 0x9d, 0xb0);
 const ORANGE: Rgba = Rgba::rgb(0xff, 0x69, 0x00);
 const RED: Rgba = Rgba::rgb(0xfa, 0x38, 0x2e);
-const TEAL: Rgba = Rgba::rgb(0x00, 0xb8, 0xc8);
 
 /// What every page draws from: style, typefaces, the device readings, and
 /// what the pages hold, from the choices made on them to where the data
@@ -70,7 +68,6 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Reboot => reboot(cx),
         Screen::Wipe => wipe(cx),
         Screen::Mount => mount(cx),
-        Screen::Browser => browser(cx),
         Screen::Install => install(cx),
         Screen::Choose(place) => choose(cx, place),
         Screen::Installing => installing(cx),
@@ -323,11 +320,6 @@ pub fn home(cx: &Ctx) -> Frame {
         });
         opens.push(Action::Open(Screen::Systems));
     }
-    // The web, under the two systems: another place this phone can be, and
-    // the one that needs nothing installed to reach. It is here whether the
-    // network is up or not - the page says how to join one.
-    rows.push(Row::new(l.pick(BROWSER_TITLE)).icon(TEAL, Icon::Globe));
-    opens.push(Action::Open(Screen::Browser));
     if !rows.is_empty() {
         let first = widgets::list(&mut c, t, f, y, &rows);
         out.extend(hits(&first.rows, &opens));
@@ -4852,354 +4844,6 @@ pub fn vbmeta(cx: &Ctx) -> Frame {
 }
 
 const VBMETA: Text = ["vbmeta 备份", "vbmeta 備份", "vbmeta copies"];
-
-// ---------------------------------------------------------------- browsing
-
-const BROWSER_HINT: Text = ["输入网址，例如 example.com", "輸入網址，例如 example.com", "Type an address, such as example.com"];
-const BROWSER_TITLE: Text = ["浏览器", "瀏覽器", "Browser"];
-const BROWSER_READING: Text = ["正在读取…", "正在讀取…", "Reading…"];
-const BROWSER_EMPTY: Text = [
-    "在上面输入一个网址，按回车读取。",
-    "在上面輸入一個網址，按 Enter 讀取。",
-    "Type an address above and press enter to read it.",
-];
-const BROWSER_NOWEB: Text = [
-    "还没有连上网络。先到「WLAN」连接一个网络，再回来。",
-    "還沒有連上網路。先到「WLAN」連接一個網路，再回來。",
-    "Not on a network yet. Join one on the WLAN page, then come back.",
-];
-const BROWSER_AGAIN: Text = ["重试", "重試", "Try again"];
-const BROWSER_NOVIDEO: Text = [
-    "这个浏览器还不能播放视频。页面把视频地址直接写出来的，可以在这里看到它叫什么。",
-    "這個瀏覽器還不能播放影片。頁面把影片網址直接寫出來的，可以在這裡看到它叫什麼。",
-    "This browser cannot play video yet. Where a page names a video outright, it is shown here.",
-];
-
-const BROWSER_MORE: Text = [
-    "页面很长，这里只画到屏幕放得下的地方。",
-    "頁面很長，這裡只畫到螢幕放得下的地方。",
-    "This page is long: it is drawn only as far as fits the screen.",
-];
-
-/// The web, one page at a time: an address to type or a link to follow, the
-/// page as it was written, and the way back to the ones before it.
-pub fn browser(cx: &Ctx) -> Frame {
-    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
-    let m = &t.m;
-    let mut c = long_page(cx);
-    let mut out = Vec::new();
-    let x = m.title_x;
-    let w = m.w as f32 - x * 2.0;
-    let mut y = m.content_top;
-
-    // The address, which touching opens the keyboard on.
-    let field = widgets::search_field(&mut c, t, f, x, w, y + m.dp(28.0), &s.browse.address, l.pick(BROWSER_HINT));
-    out.push(Hit { rect: field.field, action: Action::BrowseEdit });
-    y = field.field.y + field.field.h + m.dp(12.0);
-
-    // Back, forward, and reading it again.
-    let back = s.browse.can_go_back();
-    let forward = s.browse.can_go_forward();
-    let reading = s.browse.loading;
-    let size = m.dp(58.0);
-    let gap = m.dp(8.0);
-    let mut bx = x;
-    // Words rather than arrows: the recovery's typeface draws them, and an
-    // arrow it has no glyph for would arrive as a box.
-    for (label, live, action) in [
-        (l.pick(["上一页", "上一頁", "Back"]), back, Action::BrowseBack),
-        (l.pick(["下一页", "下一頁", "Forward"]), forward, Action::BrowseForward),
-        (l.pick(["刷新", "重新整理", "Reload"]), !reading, Action::BrowseReload),
-    ] {
-        c.fill_round_rect(bx, y, size, size, size / 2.0, if live { t.pal.card } else { t.pal.track });
-        c.text_center(&f.body, label, bx + size / 2.0, y + size / 2.0, m.dp(12.5), if live { t.pal.text } else { t.pal.subtitle });
-        if live {
-            out.push(Hit { rect: Rect::new(bx, y, size, size), action });
-        }
-        bx += size + gap;
-    }
-    if let Some((status, _)) = &s.browse.said {
-        let px = m.dp(13.3);
-        let said = format!("HTTP {status}");
-        c.text_top(&f.body, &said, bx + m.dp(4.0), y + size / 2.0 - line_height(&f.body, px) / 2.0, px, t.pal.subtitle, None);
-    }
-    y += size + m.dp(18.0);
-
-    match &s.browse.page {
-        None if reading => y = widgets::footnote(&mut c, t, f, y, l.pick(BROWSER_READING)),
-        None => {
-            let hint = if s.wlan.is_some() { BROWSER_EMPTY } else { BROWSER_NOWEB };
-            y = widgets::footnote(&mut c, t, f, y, l.pick(hint));
-        }
-        Some(Err(why)) => {
-            y = widgets::warning(&mut c, t, f, y, why);
-            let list = widgets::list(&mut c, t, f, y + m.dp(12.0), &[Row::new(l.pick(BROWSER_AGAIN)).trail(Trail::Arrow)]);
-            out.extend(hits(&list.rows, &[Action::BrowseReload]));
-            y = list.bottom;
-        }
-        Some(Ok(doc)) => {
-            let limit = c.h as f32;
-            let (after, more) = document(&mut c, t, f, l, x, y, w, doc, limit, &s.browse.pictures, &mut out);
-            y = after;
-            if more {
-                // Said rather than left off: a page cut short with nothing
-                // said reads as a page that ended.
-                let said = l.pick(BROWSER_MORE);
-                y = widgets::footnote(&mut c, t, f, y + m.dp(8.0), said);
-            }
-        }
-    }
-
-    let dock = s.browse.typing.then(|| keyboard_dock(cx, s));
-    Frame { dock, ..Frame::new(t, fit(c, t, y), out, l.pick(BROWSER_TITLE), t.m.content_top) }
-}
-
-/// A page read out, drawn block by block, its links made touchable; the
-/// height it came to.
-/// A page drawn as far as `limit`, which is what the canvas can hold: a page
-/// longer than that stops there rather than laying out blocks that would be
-/// cut off anyway.
-///
-/// Returns the height drawn, and whether more was left unread.
-#[allow(clippy::too_many_arguments)]
-fn document(
-    c: &mut Canvas,
-    t: &Theme,
-    f: &Fonts,
-    l: Lang,
-    x: f32,
-    y: f32,
-    w: f32,
-    doc: &browser::Document,
-    limit: f32,
-    pictures: &[(String, crate::image::Picture)],
-    out: &mut Vec<Hit>,
-) -> (f32, bool) {
-    let m = &t.m;
-    let mut y = y;
-    // The links are numbered as they are met, which is the order the page
-    // collected them in.
-    let mut next_link = 0u32;
-    if !doc.title.is_empty() {
-        let px = m.dp(24.0);
-        // A title is a name, not a paragraph: a page that calls itself two
-        // hundred words long is trimmed where a reader stops reading it.
-        let title: String = if doc.title.chars().count() > 160 {
-            let mut cut: String = doc.title.chars().take(160).collect();
-            cut.push('…');
-            cut
-        } else {
-            doc.title.clone()
-        };
-        for line in wrap_plain(c, &f.heading, &title, px, w) {
-            c.text_top(&f.heading, &line, x, y, px, t.pal.text, None);
-            y += line_height(&f.heading, px);
-        }
-        y += m.dp(16.0);
-    }
-    for block in &doc.blocks {
-        if y >= limit {
-            return (y, true);
-        }
-        y = match block {
-            browser::Block::Heading { level, text } => {
-                y += m.dp(10.0);
-                let px = match level {
-                    1 => m.dp(27.0),
-                    2 => m.dp(23.0),
-                    3 => m.dp(20.0),
-                    _ => m.dp(17.5),
-                };
-                for line in wrap_plain(c, &f.heading, text, px, w) {
-                    c.text_top(&f.heading, &line, x, y, px, t.pal.text, None);
-                    y += line_height(&f.heading, px);
-                }
-                y + m.dp(13.0)
-            }
-            browser::Block::Para(spans) => {
-                spans_lines(c, t, f, x, y, w, spans, m.dp(15.5), t.pal.text, out, &mut next_link) + m.dp(13.0)
-            }
-            browser::Block::Quote(spans) => {
-                let left = x + m.dp(16.0);
-                let start = y;
-                let after = spans_lines(c, t, f, left, y, w - m.dp(22.0), spans, m.dp(15.0), t.pal.subtitle, out, &mut next_link);
-                c.fill_round_rect(x, start, m.dp(3.0), (after - start).max(1.0), m.dp(1.5), t.pal.track);
-                after + m.dp(13.0)
-            }
-            browser::Block::Item { depth, marker, spans } => {
-                let px = m.dp(15.0);
-                let indent = x + m.dp(18.0) * *depth as f32;
-                c.text_top(&f.body, marker, indent, y, px, t.pal.subtitle, None);
-                let left = indent + m.dp(20.0);
-                spans_lines(c, t, f, left, y, (x + w) - left, spans, px, t.pal.text, out, &mut next_link) + m.dp(7.0)
-            }
-            browser::Block::Code(text) => {
-                let px = m.dp(13.0);
-                let lines: Vec<&str> = text.lines().take(400).collect();
-                let line_h = line_height(&f.mono, px);
-                let box_h = line_h * lines.len() as f32 + m.dp(18.0);
-                c.fill_round_rect(x, y, w, box_h, m.dp(10.0), t.pal.card);
-                let mut ly = y + m.dp(9.0);
-                for line in &lines {
-                    c.text_top(&f.mono, line, x + m.dp(12.0), ly, px, t.pal.text, None);
-                    ly += line_h;
-                }
-                y + box_h + m.dp(13.0)
-            }
-            browser::Block::Rule => {
-                c.fill_rect(x, y + m.dp(8.0), w, 1.0, t.pal.track);
-                y + m.dp(20.0)
-            }
-            browser::Block::Video { src, name } => {
-                // A video the page names outright, offered as something to
-                // fetch: what can be done with it is said on the card.
-                let box_h = m.dp(96.0);
-                c.fill_round_rect(x, y, w, box_h, m.dp(12.0), t.pal.card);
-                let disc = m.dp(48.0);
-                let cx = x + m.dp(22.0) + disc / 2.0;
-                let cy = y + box_h / 2.0;
-                c.fill_circle(cx, cy, disc / 2.0, t.pal.accent);
-                // A triangle, pointing right.
-                let r = disc * 0.16;
-                c.fill_convex(&[
-                    (cx - r * 0.7, cy - r),
-                    (cx - r * 0.7, cy + r),
-                    (cx + r * 1.1, cy),
-                ], t.pal.card);
-                let text_x = x + m.dp(22.0) + disc + m.dp(16.0);
-                let px = m.dp(15.0);
-                let room = (x + w) - text_x - m.dp(14.0);
-                let shown = wrap_plain(c, &f.body, name, px, room);
-                if let Some(first) = shown.first() {
-                    c.text_top(&f.body, first, text_x, y + box_h / 2.0 - line_height(&f.body, px), px, t.pal.text, None);
-                }
-                let small = m.dp(12.5);
-                c.text_top(&f.body, l.pick(["视频", "影片", "video"]), text_x, y + box_h / 2.0 + m.dp(4.0), small, t.pal.subtitle, None);
-                // Its place in the page's links, numbered as the page
-                // collected them: a video is a link like any other.
-                let at = next_link;
-                next_link += 1;
-                out.push(Hit { rect: Rect::new(x, y, w, box_h), action: Action::BrowseLink(at) });
-                let _ = src;
-                // Said plainly rather than left to be discovered.
-                widgets::footnote(c, t, f, y + box_h + m.dp(6.0), l.pick(BROWSER_NOVIDEO)) + m.dp(13.0)
-            }
-            browser::Block::Image { alt, src } => {
-                // A picture that came with the page is drawn; one that did
-                // not is named where it would have been, which is all a
-                // reader can be given without asking the server again.
-                let held = pictures.iter().find(|(url, _)| url == src).map(|(_, picture)| picture);
-                if let Some(picture) = held {
-                    let (dw, dh) = crate::image::fitted(picture, w, m.dp(420.0));
-                    if dw >= 1.0 && dh >= 1.0 {
-                        if y + dh > limit || y + dh > c.h as f32 {
-                            return (y, true);
-                        }
-                        c.draw_picture(x, y, dw, dh, picture);
-                        y + dh + m.dp(12.0)
-                    } else {
-                        y
-                    }
-                } else {
-                    let box_h = m.dp(70.0);
-                    c.fill_round_rect(x, y, w, box_h, m.dp(10.0), t.pal.card);
-                    let px = m.dp(13.3);
-                    let what = if alt.is_empty() { l.pick(["图片", "圖片", "image"]) } else { alt.as_str() };
-                    for (i, line) in wrap_plain(c, &f.body, what, px, w - m.dp(24.0)).iter().take(2).enumerate() {
-                        c.text_top(&f.body, line, x + m.dp(12.0), y + m.dp(14.0) + i as f32 * line_height(&f.body, px), px, t.pal.subtitle, None);
-                    }
-                    y + box_h + m.dp(13.0)
-                }
-            }
-        };
-    }
-    (y, false)
-}
-
-/// Lay `spans` out and draw them, each run of a link made touchable; the
-/// height they came to.
-#[allow(clippy::too_many_arguments)]
-fn spans_lines(
-    c: &mut Canvas,
-    t: &Theme,
-    f: &Fonts,
-    x: f32,
-    y: f32,
-    w: f32,
-    spans: &[browser::Span],
-    px: f32,
-    ink: Rgba,
-    out: &mut Vec<Hit>,
-    next_link: &mut u32,
-) -> f32 {
-    // Each span that leads somewhere is numbered once, before any line of it
-    // is drawn, so that a link broken across lines is still one link.
-    let numbers: Vec<Option<u32>> = spans
-        .iter()
-        .map(|span| {
-            if span.link.is_some() {
-                let n = *next_link;
-                *next_link += 1;
-                Some(n)
-            } else {
-                None
-            }
-        })
-        .collect();
-    let lines = {
-        let measured = &*c;
-        browser::layout(spans, w, &|text| measured.text_width(&f.body, text, px))
-    };
-    let line_h = line_height(&f.body, px);
-    let mut at = y;
-    for line in &lines {
-        let mut at_x = x;
-        // Where each run of a link starts and ends on this line.
-        let mut run: Option<(u32, f32, f32)> = None;
-        for piece in &line.pieces {
-            let number = numbers[piece.span];
-            let width = c.text_width(&f.body, &piece.text, px);
-            let linked = number.is_some();
-            c.text_top(&f.body, &piece.text, at_x, at, px, if linked { t.pal.accent } else { ink }, None);
-            if linked {
-                c.fill_rect(at_x, at + line_h - t.m.dp(2.5), width, 1.0, t.pal.accent);
-            }
-            match (number, &mut run) {
-                (Some(n), Some((held, _, end))) if n == *held => *end = at_x + width,
-                (Some(n), Some((held, begin, end))) => {
-                    out.push(Hit { rect: Rect::new(*begin, at, *end - *begin, line_h), action: Action::BrowseLink(*held) });
-                    run = Some((n, at_x, at_x + width));
-                }
-                (Some(n), None) => run = Some((n, at_x, at_x + width)),
-                (None, Some((held, begin, end))) => {
-                    out.push(Hit { rect: Rect::new(*begin, at, *end - *begin, line_h), action: Action::BrowseLink(*held) });
-                    run = None;
-                }
-                (None, None) => {}
-            }
-            at_x += width;
-        }
-        if let Some((number, begin, end)) = run {
-            out.push(Hit { rect: Rect::new(begin, at, end - begin, line_h), action: Action::BrowseLink(number) });
-        }
-        at += line_h;
-    }
-    at
-}
-
-/// How tall one line of `face` at `px` stands: its letters' reach above and
-/// below the baseline, and never less than the size itself.
-fn line_height(face: &Face, px: f32) -> f32 {
-    let (above, below) = face.line(px);
-    (above.abs() + below.abs()).max(px)
-}
-
-/// `text` broken into lines no wider than `w`, by the words it is made of.
-fn wrap_plain(c: &Canvas, face: &Face, text: &str, px: f32, w: f32) -> Vec<String> {
-    let span = browser::Span { text: text.to_string(), link: None, bold: false, italic: false };
-    let lines = browser::layout(&[span], w, &|t| c.text_width(face, t, px));
-    lines.iter().map(|l| l.text()).collect()
-}
 
 #[cfg(test)]
 mod tests {

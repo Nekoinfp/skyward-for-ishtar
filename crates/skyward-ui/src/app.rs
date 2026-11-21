@@ -1,4 +1,3 @@
-use crate::browser;
 use crate::canvas::{Canvas, Run};
 use crate::charge;
 use crate::color::Rgba;
@@ -76,9 +75,6 @@ pub enum Screen {
     Permissions,
     /// A text file, changed on the screen's keyboard and then saved.
     Editor,
-    /// The web, one page at a time: an address to read, what the server said,
-    /// and the links within it to follow.
-    Browser,
     Terminal,
     /// Giving the data partition's files the SELinux labels the installed
     /// system's rules give them: what it does and a swipe to start, then
@@ -1348,18 +1344,6 @@ pub enum Action {
     /// then confirms it.
     AskDeleteDownload,
     Open(Screen),
-    /// Follow the `n`th link of the page being read, counting from the top.
-    BrowseLink(u32),
-    /// Go back to the page before the one being read.
-    BrowseBack,
-    /// Go forward again to the page left behind.
-    BrowseForward,
-    /// Read the address being read again.
-    BrowseReload,
-    /// Type an address: the keyboard comes up on the address as it stands.
-    BrowseEdit,
-    /// Stop typing: the address as typed is read.
-    BrowseTyped,
     /// Leave the decrypt page for the page it was opened from; the page
     /// the recovery started on, for the home page without keeping it
     /// behind.
@@ -1788,53 +1772,6 @@ impl Frame {
     }
 }
 
-/// How many links of one page a reader may be offered: past this the rest
-/// are drawn but not touchable.
-const MOST_LINKS: usize = 1_000;
-
-/// What the browser page holds: the address being read, the page it gave,
-/// the pages gone before, and where the reader is among them.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Browse {
-    /// The address as it stands, typed or followed.
-    pub address: String,
-    /// The address is being typed, so the keyboard is up.
-    pub typing: bool,
-    /// The page, once one has been read; where it could not be, why.
-    pub page: Option<Result<browser::Document, String>>,
-    /// What the server answered for something not shown as text, and where
-    /// it settled after its redirects.
-    pub said: Option<(u16, String)>,
-    /// Waiting on the server.
-    pub loading: bool,
-    /// The addresses the page being read links to, in the order they are
-    /// read: what a touch on a link names.
-    pub links: Vec<String>,
-    /// The page's pictures, by address, fetched with the page so that they
-    /// are drawn rather than asked for one at a time as it scrolls.
-    pub pictures: Vec<(String, crate::image::Picture)>,
-    /// Addresses read, the one on the page among them.
-    pub history: Vec<String>,
-    /// Where among them the reader is.
-    pub at: usize,
-}
-
-impl Browse {
-    /// Whether there is a page before the one on screen.
-    pub fn can_go_back(&self) -> bool {
-        self.at > 0
-    }
-
-    /// Whether there is a page after it.
-    pub fn can_go_forward(&self) -> bool {
-        self.at + 1 < self.history.len()
-    }
-
-    /// The address being read, once one is.
-    pub fn showing(&self) -> Option<&str> {
-        self.history.get(self.at).map(String::as_str)
-    }
-}
 /// Choices the pages show and the user changes, and where installing
 /// stands.
 #[derive(Clone, Debug, PartialEq)]
@@ -1986,9 +1923,6 @@ pub struct State {
     pub others: Vec<(u32, Keys)>,
     /// What is typed in the search field.
     pub search: String,
-    /// What the browser page holds: the address, the page, and where in the
-    /// pages gone before the reader is.
-    pub browse: Browse,
     /// The on-screen keyboard's layer.
     pub layer: Layer,
     /// The key of the on-screen keyboard, or the choice of a list open over
@@ -2169,7 +2103,6 @@ impl Default for State {
             phone_logs: 0,
             pattern: Vec::new(),
             confirm: 0.0,
-            browse: Browse::default(),
             install: Install::Idle,
             source: Source::Computer,
             package_name: None,
@@ -2474,9 +2407,6 @@ pub enum Effect {
     /// List the folder at this path from the top of a place, to choose a
     /// file to install in, telling what it holds with [`App::set_place`].
     ReadPlace(Place, String),
-    /// Read `url` off the web, telling the page what came back with
-    /// [`App::browse_read`].
-    Browse(String),
     /// Open the data partition as far as it opens with nothing a user
     /// knows, telling what waits with [`App::data_waiting`] or why it did
     /// not open with [`App::data_failed`].
@@ -6096,40 +6026,6 @@ impl App {
                 }
                 return self.arrive_at(s);
             }
-            Action::BrowseLink(which) => {
-                let Some(url) = self.state.browse.links.get(which as usize).cloned() else { return Vec::new() };
-                return self.browse_to(url, false);
-            }
-            Action::BrowseBack => {
-                if !self.state.browse.can_go_back() {
-                    return Vec::new();
-                }
-                self.state.browse.at -= 1;
-                let url = self.state.browse.showing().unwrap_or_default().to_string();
-                return self.browse_to(url, true);
-            }
-            Action::BrowseForward => {
-                if !self.state.browse.can_go_forward() {
-                    return Vec::new();
-                }
-                self.state.browse.at += 1;
-                let url = self.state.browse.showing().unwrap_or_default().to_string();
-                return self.browse_to(url, true);
-            }
-            Action::BrowseReload => {
-                let Some(url) = self.state.browse.showing().map(str::to_string) else { return Vec::new() };
-                return self.browse_to(url, true);
-            }
-            Action::BrowseEdit => {
-                self.state.browse.typing = true;
-                self.refresh();
-                return Vec::new();
-            }
-            Action::BrowseTyped => {
-                self.state.browse.typing = false;
-                let typed = self.state.browse.address.clone();
-                return self.browse_to(typed, false);
-            }
             Action::OpenData => return self.open_data(),
             // A user offered by name: the page asks for their screen lock,
             // as it does for the owner's.
@@ -6953,8 +6849,6 @@ impl App {
         match self.screen() {
             Screen::Search => &mut self.state.search,
             Screen::Files => &mut self.state.files_query,
-            // Typing an address is what the browser page's keys are for.
-            Screen::Browser => &mut self.state.browse.address,
             Screen::Decrypt => &mut self.state.code,
             Screen::Rename => &mut self.state.new_name,
             Screen::WlanPassword => &mut self.state.password,
@@ -6995,100 +6889,7 @@ impl App {
         Vec::new()
     }
 
-    /// Read `url` on the browser page. `keeping` leaves the pages gone
-    /// before as they are, which going back and forward need; a new address
-    /// starts a new page after the one being read.
-    fn browse_to(&mut self, url: String, keeping: bool) -> Vec<Effect> {
-        let url = browser::normalise(&url);
-        if url.is_empty() {
-            return Vec::new();
-        }
-        let b = &mut self.state.browse;
-        b.address = url.clone();
-        b.typing = false;
-        b.loading = true;
-        b.page = None;
-        b.said = None;
-        if !keeping {
-            b.history.truncate(b.at + 1);
-            b.history.push(url.clone());
-            b.at = b.history.len() - 1;
-        }
-        // A video is not a page to read: it is named, and what the recovery
-        // can do about it is what the card says.
-        if browser::is_video(&url) {
-            let name = browser::file_name_of(&url);
-            b.loading = false;
-            b.said = None;
-            b.links.clear();
-            b.page = Some(Ok(browser::Document {
-                title: String::new(),
-                blocks: vec![browser::Block::Video { src: url, name }],
-            }));
-            self.refresh();
-            return Vec::new();
-        }
-        self.refresh();
-        vec![Effect::Browse(url)]
-    }
 
-    /// What the web answered, for the browser page: the page read into what
-    /// a reader is shown, or why there is none.
-    pub fn browse_read(
-        &mut self,
-        page: Result<(skyward_net::browse::Page, browser::Document), String>,
-        pictures: Vec<(String, crate::image::Picture)>,
-    ) {
-        let b = &mut self.state.browse;
-        b.loading = false;
-        match page {
-            Err(why) => {
-                b.pictures.clear();
-                b.page = Some(Err(why));
-            }
-            Ok((page, document)) => {
-                b.pictures = pictures;
-                // Where it settled is the address it is at now: a redirect
-                // followed is the page's own.
-                b.address = page.url.clone();
-                b.said = Some((page.status, page.url.clone()));
-                if let Some(slot) = b.history.get_mut(b.at) {
-                    *slot = page.url.clone();
-                }
-                // The links in the order a reader meets them, which is the
-                // order the page numbers them as it draws.
-                b.links.clear();
-                for block in &document.blocks {
-                    // A video is offered as a link too, and is numbered
-                    // where it stands among them.
-                    if let browser::Block::Video { src, .. } = block {
-                        if b.links.len() < MOST_LINKS {
-                            b.links.push(src.clone());
-                        }
-                        continue;
-                    }
-                    let spans = match block {
-                        browser::Block::Para(spans) | browser::Block::Quote(spans) => spans.as_slice(),
-                        browser::Block::Item { spans, .. } => spans.as_slice(),
-                        _ => continue,
-                    };
-                    for span in spans {
-                        // A page of thousands of links is not one a reader
-                        // follows by touching, and holding them all costs the
-                        // recovery's memory.
-                        if b.links.len() >= MOST_LINKS {
-                            break;
-                        }
-                        if let Some(url) = &span.link {
-                            b.links.push(url.clone());
-                        }
-                    }
-                }
-                b.page = Some(Ok(document));
-            }
-        }
-        self.refresh();
-    }
     /// Install the file of `size` bytes at `path` in `place`, its page
     /// following how it goes; one install at a time.
     fn install_file(&mut self, place: Place, path: String, size: u64, now: u64) -> Vec<Effect> {
@@ -7263,11 +7064,6 @@ impl App {
                 // Return puts the file manager's keyboard away, keeping what
                 // the box found: the list stays as it is under the box.
                 Screen::Files => return self.act(Action::CloseFilesSearch, now),
-                // Return reads the address as it was typed.
-                Screen::Browser => {
-                    let typed = self.state.browse.address.clone();
-                    return self.browse_to(typed, false);
-                }
                 Screen::Decrypt if self.state.code.is_empty() => self.say(l.pick(["请输入锁屏密码", "請輸入螢幕鎖定密碼", "Enter the screen lock"]), now),
                 Screen::Decrypt => {
                     let code = std::mem::take(&mut self.state.code);
@@ -10575,7 +10371,7 @@ mod tests {
         press(&mut app, Key::VolumeDown, 0);
         assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::About))));
         press(&mut app, Key::VolumeDown, 0);
-        assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Browser))));
+        assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Install))));
         press(&mut app, Key::VolumeUp, 0);
         assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::About))));
         press(&mut app, Key::VolumeUp, 0);
@@ -10832,10 +10628,10 @@ mod tests {
         app.tick(REPEAT_DELAY_MS);
         assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::About))));
         app.tick(REPEAT_DELAY_MS + REPEAT_MS);
-        assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Browser))));
+        assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Install))));
         app.key_up(Key::VolumeDown, REPEAT_DELAY_MS + REPEAT_MS + 10);
         app.tick(REPEAT_DELAY_MS + REPEAT_MS * 5);
-        assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Browser))), "let go, it stops");
+        assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Install))), "let go, it stops");
     }
 
     #[test]
