@@ -192,6 +192,45 @@ fn main() -> Result<()> {
         println!("wrote {}", path.display());
     }
 
+    // The browser, with a page read into it: the markup reader and the
+    // block-by-block layout, drawn as a reader would meet them.
+    {
+        let sample = r#"<html><head><title>Skyward — a page read as text</title></head><body>
+            <h1>Reading the web in a recovery</h1>
+            <p>This page was <b>not</b> rendered by an engine. Its markup was read into
+            blocks — headings, paragraphs, lists — and each block was laid out by the
+            words it is made of. <a href="https://example.com/more">A link leads
+            somewhere</a>, and touching it goes there.</p>
+            <h2>What is kept, and what is not</h2>
+            <ul>
+              <li>Headings, by their level.</li>
+              <li>Paragraphs, and the emphasis inside them: <i>italic</i> and bold.</li>
+              <li>Lists, with the depth they are nested at.
+                <ul><li>A list inside a list.</li></ul>
+              </li>
+            </ul>
+            <h3>What is not</h3>
+            <blockquote>Scripts do not run. Stylesheets are not applied. An image is named
+            rather than fetched.</blockquote>
+            <ol><li>First numbered item.</li><li>Second one, with a longer line that has to
+            wrap somewhere before the end of the room it is given.</li></ol>
+            <img src="/a.png" alt="a picture, named but not drawn">
+            <hr>
+            <p>Plain text after a rule, to see where the rule falls.</p>
+            </body></html>"#;
+        let mut app = opened(Screen::Browser, w, h, ppd);
+        app.state.browse.address = "https://example.com/page".to_string();
+        app.state.browse.said = Some((200, "https://example.com/page".to_string()));
+        app.state.browse.history = vec!["https://example.com/page".to_string()];
+        app.state.browse.page = Some(Ok(skyward_ui::browser::read(sample, "https://example.com/page")));
+        let path = out.join("11b-browser-light.png");
+        write_png(&path, &whole_page(&mut app, &fonts, &info))?;
+        println!("wrote {}", path.display());
+        app.state.dark = true;
+        let path = out.join("11c-browser-dark.png");
+        write_png(&path, &whole_page(&mut app, &fonts, &info))?;
+        println!("wrote {}", path.display());
+    }
     // The screen kept on, which warns about burn-in.
     let mut app = opened(Screen::ScreenOff, w, h, ppd);
     app.state.dark = true;

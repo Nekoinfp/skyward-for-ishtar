@@ -203,8 +203,10 @@ impl Building {
             code.push_str(&text);
             return;
         }
-        // Words outside any block still belong to one.
-        let trimmed = if self.heading > 0 || self.quote { text.clone() } else { collapse(&text) };
+        // A span keeps the spaces at its edges: markup splits words across
+        // spans (was <b>not</b> rendered), and the block trims its own ends
+        // once it is whole.
+        let trimmed = collapse_edges(&text);
         if trimmed.is_empty() {
             return;
         }
@@ -219,7 +221,8 @@ impl Building {
     /// Close the block being built, if it holds anything.
     fn close_block(&mut self) {
         self.flush_text();
-        let spans = std::mem::take(&mut self.spans);
+        let mut spans = std::mem::take(&mut self.spans);
+        trim_edges(&mut spans);
         if self.heading > 0 {
             let text = spans_text(&spans).trim().to_string();
             if !text.is_empty() {
@@ -526,6 +529,44 @@ fn named(name: &str) -> Option<char> {
     })
 }
 
+/// Text with its runs of whitespace made one space each, keeping a single
+/// space at either end where one was written.
+///
+/// A block's words are trimmed as a whole and not span by span: markup puts
+/// a space before `<b>` and after `</b>`, and trimming each span would run
+/// the words together.
+fn collapse_edges(text: &str) -> String {
+    let lead = text.starts_with(|c: char| c.is_whitespace());
+    let trail = text.ends_with(|c: char| c.is_whitespace());
+    let body = collapse(text);
+    if body.is_empty() {
+        return String::new();
+    }
+    let mut out = String::with_capacity(body.len() + 2);
+    if lead {
+        out.push(' ');
+    }
+    out.push_str(&body);
+    if trail {
+        out.push(' ');
+    }
+    out
+}
+
+/// Take the space off a block's first and last words, and drop the spans that
+/// were only space.
+fn trim_edges(spans: &mut Vec<Span>) {
+    if let Some(first) = spans.first_mut() {
+        let cut = first.text.len() - first.text.trim_start().len();
+        first.text.drain(..cut);
+    }
+    if let Some(last) = spans.last_mut() {
+        let kept = last.text.trim_end().len();
+        last.text.truncate(kept);
+    }
+    spans.retain(|span| !span.text.is_empty());
+}
+
 /// Text with its runs of whitespace made one space each, and its ends
 /// trimmed: what markup means by whitespace.
 pub fn collapse(text: &str) -> String {
@@ -661,9 +702,9 @@ mod tests {
         assert_eq!(
             linked,
             vec![
-                ("See", None),
+                ("See ", None),
                 ("about", Some("https://example.com/about")),
-                ("and", None),
+                (" and ", None),
                 ("next", Some("https://example.com/docs/next")),
                 (".", None),
             ]
@@ -839,6 +880,31 @@ fn words_of(text: &str) -> Vec<String> {
     out
 }
 
+
+    #[test]
+    fn a_word_split_across_spans_keeps_the_spaces_around_it() {
+        let doc = read("<p>This page was <b>not</b> rendered by an engine.</p>", "https://example.com");
+        let Block::Para(spans) = &doc.blocks[0] else { panic!("a paragraph: {:?}", doc.blocks) };
+        assert_eq!(spans_text(spans), "This page was not rendered by an engine.", "spans: {spans:?}");
+    }
+
+    #[test]
+    fn a_quotation_is_collapsed_like_any_other_block() {
+        let html = "<blockquote>An image is named\n            rather than fetched.</blockquote>";
+        let doc = read(html, "https://example.com");
+        let Block::Quote(spans) = &doc.blocks[0] else { panic!("a quotation: {:?}", doc.blocks) };
+        assert_eq!(spans_text(spans), "An image is named rather than fetched.", "spans: {spans:?}");
+    }
+
+    #[test]
+    fn a_block_does_not_begin_or_end_with_a_space() {
+        for html in ["<p>  padded  </p>", "<p><b>bold</b> tail</p>", "<p>lead <i>it</i></p>"] {
+            let doc = read(html, "https://example.com");
+            let Block::Para(spans) = &doc.blocks[0] else { panic!("a paragraph") };
+            let text = spans_text(spans);
+            assert_eq!(text, text.trim(), "{html}: {text:?} keeps a space at an edge");
+        }
+    }
 #[cfg(test)]
 mod layout_tests {
     use super::*;
