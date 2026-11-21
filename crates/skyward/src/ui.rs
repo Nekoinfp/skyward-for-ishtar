@@ -2908,6 +2908,14 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         app.found_files(gen, found);
                     }
                     Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,
+            // The browser asks the web for a page and hands it to the page.
+            // It waits here because a reader who asked for an address is
+            // waiting too, and the page says so while it does.
+            Effect::Browse(url) => {
+                let agent = skyward_net::http::agent(servers.clone());
+                let read = skyward_net::browse::get(&agent, &url).map_err(|e| format!("{e:#}"));
+                app.browse_read(read);
+            }
                     // A name taken where an entry goes is the user's to
                     // decide on before anything is written.
                     Effect::Paste { op, path, into, clash } => {
