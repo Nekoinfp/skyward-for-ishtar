@@ -207,7 +207,10 @@ fn page(cx: &Ctx) -> Canvas {
 
 /// A canvas tall enough for a scrolling page; [`fit`] trims it to the content.
 fn long_page(cx: &Ctx) -> Canvas {
-    sheet(cx, cx.t.m.h * 3, cx.t.pal.bg)
+    // Four screens: the parameters page comes to a little over two on this
+    // phone, and a canvas shorter than the page cuts its last cards off with
+    // nothing said about it. The cost is held only while such a page is drawn.
+    sheet(cx, cx.t.m.h * 4, cx.t.pal.bg)
 }
 
 /// How tall a long page whose content ends at `bottom` is: to the bottom
