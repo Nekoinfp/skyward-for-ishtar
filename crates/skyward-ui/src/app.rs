@@ -5552,7 +5552,7 @@ impl App {
         self.say(&text, now);
     }
 
-    fn say(&mut self, text: &str, now: u64) {
+    pub fn say(&mut self, text: &str, now: u64) {
         self.toast = Some((text.to_string(), now + TOAST_MS));
         self.dirty = true;
     }
